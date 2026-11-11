@@ -1,0 +1,138 @@
+---
+title: Ghuri
+description: Django for TypeScript. Start on Cloudflare Workers with D1 and R2, scale to Postgres on any VPS without rewriting your app.
+template: splash
+hero:
+  tagline: Django for TypeScript. Start on Cloudflare for almost nothing, move to Postgres on any server by changing settings, not code.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Write your first app
+      link: /docs/tutorial/part-1-models/
+      icon: right-arrow
+    - text: Coming from Django?
+      link: /docs/django-developers/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Steps, Tabs, TabItem } from '@astrojs/starlight/components'
+
+## Start on the edge, grow without a rewrite
+
+Ghuri gives you the shape of Django (settings, installed apps, models with managers,
+migrations, `urls.ts`, class-based views, an admin, a REST framework) written in strict
+TypeScript and built on [Hono](https://hono.dev) and [Drizzle](https://orm.drizzle.team).
+
+A new project runs on **Cloudflare Workers with D1, R2 and KV**. That costs close to nothing
+while you find out whether anyone wants what you are building. When you outgrow it, point
+`DATABASES` at Postgres, run `ghuri migrate`, copy your data with `ghuri dumpdata` and
+`ghuri loaddata`, and deploy the same code to Node on any VPS or container platform.
+
+```ts title="src/blog/models.ts"
+import { Model, CharField, TextField, DateTimeField, ForeignKey, CASCADE } from '@ghuri/orm'
+import { User } from '@ghuri/auth'
+
+export class Post extends Model({
+  title: new CharField({ maxLength: 200 }),
+  body: new TextField({ blank: true }),
+  author: new ForeignKey(() => User, { onDelete: CASCADE, relatedName: 'posts' }),
+  createdAt: new DateTimeField({ autoNowAdd: true }),
+}) {
+  static Meta = { ordering: ['-createdAt'] }
+  toString() { return this.title }
+}
+
+const recent = await Post.objects
+  .filter({ author__username: 'rifat', title__icontains: 'workers' })
+  .selectRelated('author')
+  .slice(0, 10)
+```
+
+## Batteries included
+
+<CardGrid>
+  <Card title="Models and migrations" icon="database">
+    A Django-style ORM with lazy, chainable QuerySets, `__` lookups across relations,
+    `F`/`Q` expressions, aggregation and autodetected migrations. One codebase runs on
+    D1, SQLite and Postgres.
+  </Card>
+  <Card title="The admin" icon="setting">
+    `admin.site.register(Post)` gives you a server-rendered admin with search, filters,
+    inlines, bulk actions and permissions. It runs on Workers with no build step.
+  </Card>
+  <Card title="REST framework" icon="puzzle">
+    Serializers, viewsets, routers, permissions, pagination, filtering, throttling and an
+    OpenAPI 3.1 schema. If you know DRF you already know the API.
+  </Card>
+  <Card title="Auth" icon="padlock">
+    Users, groups and permissions, sessions, tokens and JWT. Password hashes use Django's
+    `pbkdf2_sha256` format, so you can bring your existing users with you.
+  </Card>
+  <Card title="Storage" icon="document">
+    `FileField` and `ImageField` backed by R2 on Cloudflare, or S3, MinIO or the local
+    filesystem anywhere else.
+  </Card>
+  <Card title="AI agents and MCP" icon="rocket">
+    Turn models and viewsets into agent tools that respect your permissions, and expose
+    them to any MCP client with one URL pattern.
+  </Card>
+</CardGrid>
+
+## Quick start
+
+<Steps>
+
+1. Create a project. The default template targets Cloudflare Workers with D1.
+
+   ```sh
+   npm create ghuri@latest mysite
+   cd mysite
+   ```
+
+2. Add an app and create the database tables.
+
+   ```sh
+   npx ghuri startapp blog
+   npx ghuri makemigrations
+   npx ghuri migrate
+   ```
+
+3. Create an admin user and start the development server.
+
+   ```sh
+   npx ghuri createsuperuser
+   npm run dev
+   ```
+
+   Open `http://localhost:8787/admin/` and sign in.
+
+</Steps>
+
+## One project, two homes
+
+The only lines that change when you leave Cloudflare are in `settings.ts` and the entry file.
+
+<Tabs>
+  <TabItem label="Cloudflare Workers">
+  ```ts title="src/settings.ts"
+  DATABASES: { default: d1('DB') },
+  STORAGES: { default: r2('MEDIA') },
+  CACHES: { default: kvCache('CACHE') },
+  ```
+  </TabItem>
+  <TabItem label="Node + Postgres">
+  ```ts title="src/settings.ts"
+  DATABASES: { default: postgres({ url: env.DATABASE_URL }) },
+  STORAGES: { default: s3({ endpoint, bucket, accessKeyId, secretAccessKey }) },
+  CACHES: { default: memoryCache() },
+  ```
+  </TabItem>
+</Tabs>
+
+<CardGrid>
+  <LinkCard title="Install Ghuri" href="/docs/getting-started/installation/" description="Requirements and your first project." />
+  <LinkCard title="Tutorial: build a blog" href="/docs/tutorial/part-1-models/" description="Models, migrations, admin, REST API, deploy." />
+  <LinkCard title="Ghuri for Django developers" href="/docs/django-developers/" description="Python and TypeScript, side by side." />
+  <LinkCard title="Migrating from D1 to Postgres" href="/docs/deployment/d1-to-postgres/" description="The escape hatch, step by step." />
+</CardGrid>
