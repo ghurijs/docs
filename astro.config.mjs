@@ -77,6 +77,8 @@ export default defineConfig({
             { slug: 'topics/websockets' },
             { slug: 'topics/authentication' },
             { slug: 'topics/auth-tokens' },
+            { slug: 'topics/social-login' },
+            { slug: 'topics/login-strategies' },
             { slug: 'topics/file-storage' },
             { slug: 'topics/storage-backends' },
             { slug: 'topics/caching' },

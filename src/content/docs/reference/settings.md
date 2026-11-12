@@ -299,6 +299,30 @@ REALTIME: {
 
 See [WebSockets](/docs/topics/websockets/).
 
+## Social login (`@ghuri/socialauth`)
+
+| Key (`SOCIALACCOUNT.*`) | Type | Default | Description |
+|---|---|---|---|
+| `PROVIDERS` | `Record<string, { APP?, APPS?, SCOPE?, AUTH_PARAMS?, VERIFIED_EMAIL? }>` | `{}` | Provider credentials and options; `APPS` for several OpenID Connect apps. |
+| `ADAPTER` | `class extends SocialAccountAdapter` | `SocialAccountAdapter` | Customize signup and linking. |
+| `AUTO_SIGNUP` | `boolean` | `true` | Create users from the profile without a form when possible. |
+| `EMAIL_AUTHENTICATION` | `boolean` | `false` | Link to an existing user with the same **verified** email. |
+| `EMAIL_REQUIRED` | `boolean` | `false` | Ask for an email when the provider gives none. |
+| `LOGIN_ON_GET` | `boolean` | `false` | Start logins on GET (otherwise GET shows a confirm page; POST starts). |
+| `STORE_TOKENS` | `boolean` | `false` | Keep provider tokens, encrypted, in `SocialToken`. |
+| `LOGIN_RESPONSE` | `'session' \| 'jwt'` | `'session'` | `'jwt'` hands SPAs a one-time code at `FRONTEND_URL`. |
+| `FRONTEND_URL` | `string` | none | Where browser flows return in JWT mode (`#code=` / `#error=`). |
+| `LOGIN_ERROR_URL` | `string` | `LOGIN_URL` | Where browser flows go on errors, with `?error=`. |
+
+## Login strategies (`@ghuri/oauth`)
+
+| Key (`OAUTH.*`) | Type | Default | Description |
+|---|---|---|---|
+| `STATE_COOKIE` | `string` | `'ghuri_oauth'` | Name of the encrypted round-trip cookie. |
+| `STATE_MAX_AGE` | `number` (seconds) | `600` | How long a started login stays valid. |
+| `HTTP_TIMEOUT` | `number` (ms) | `10000` | Timeout of requests to providers. |
+| `CALLBACK_BASE_URL` | `string` | the request origin | Origin used for callback URLs (set it behind proxies that rewrite the host). |
+
 ## Reading settings in your code
 
 ```ts

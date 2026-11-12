@@ -291,6 +291,20 @@ Consumers are rebuilt for every event (Durable Objects hibernate), so keep per-c
 Password hashes use Django's `pbkdf2_sha256$<iterations>$<salt>$<hash>` format, so a user table
 copied from Django keeps working.
 
+## Social login (django-allauth)
+
+| django-allauth | Ghuri (`@ghuri/socialauth`) |
+|---|---|
+| `allauth.socialaccount` + a provider app per provider | `SocialAuthConfig` (providers built in) |
+| `SOCIALACCOUNT_PROVIDERS = {'github': {'APP': {...}}}` | `SOCIALACCOUNT: { PROVIDERS: { github: { APP: { clientId, secret } } } }` |
+| `path('accounts/', include('allauth.urls'))` | `path('accounts/', include(socialUrls))` |
+| `{% provider_login_url 'github' %}` | `reverse('socialaccount_login', { provider: 'github' })` (POST) |
+| `SOCIALACCOUNT_AUTO_SIGNUP`, `…_EMAIL_AUTHENTICATION`, `…_STORE_TOKENS` | `AUTO_SIGNUP`, `EMAIL_AUTHENTICATION`, `STORE_TOKENS` |
+| `DefaultSocialAccountAdapter` | `SocialAccountAdapter` |
+
+See [Social login](/docs/topics/social-login/). For custom flows (your own IdP, magic links, API keys) see
+[Login strategies](/docs/topics/login-strategies/).
+
 ## Signals, cache, commands
 
 | Django | Ghuri |
