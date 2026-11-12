@@ -179,6 +179,7 @@ export async function detail(c: Context) {
 | `resolveUrl(to, params?)` | `@ghuri/core` | The URL `redirect()` would use, without redirecting (Django's `resolve_url`) |
 | `getObjectOr404(source, lookup)` | `@ghuri/orm` | `get()` on a model, manager or queryset that throws `Http404` instead of `DoesNotExist` |
 | `getUser(c)` | `@ghuri/core` | The request user, `AnonymousUser` if none |
+| `getRemoteAddr(c)` | `@ghuri/core` | The client address (Django's `REMOTE_ADDR`): `CF-Connecting-IP` on Cloudflare, the socket address on Node, else `''`. Never reads `X-Forwarded-For` |
 
 ### Rendering HTML with JSX
 
@@ -281,7 +282,8 @@ parameters).
 - Missing methods answer **405** with an `Allow` header; `HEAD` falls back to `get()`;
   `OPTIONS` answers 200 with `Allow`.
 - Override `setup(c)` or `dispatch(c)` for logic shared by every method, as in Django.
-- Set `static csrfExempt = true` to exempt every view the class produces from CSRF checks.
+- Set `static csrfExempt = true` to exempt every view the class produces from CSRF checks, and
+  `static xframeOptionsExempt = true` to exempt them from `XFrameOptionsMiddleware`.
 
 Two generic views are built in:
 

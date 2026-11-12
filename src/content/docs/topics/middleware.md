@@ -177,6 +177,19 @@ authentication (the default `MiddlewareAuthentication`, and `SessionAuthenticati
 Sets `X-Frame-Options: DENY` (or the value of `X_FRAME_OPTIONS`; `false` disables it) on
 responses that do not set it themselves, to prevent clickjacking.
 
+To let other pages frame one view (an embed, or a preview shown inside a dashboard), exempt it,
+like Django's `@xframe_options_exempt`. Class views can set `static xframeOptionsExempt = true`.
+A header the view sets itself is always kept, so you can also send `SAMEORIGIN` from one view:
+
+```ts
+import { xframeOptionsExempt } from '@ghuri/core'
+
+path('embed/', xframeOptionsExempt(embedView))   // no X-Frame-Options (also works on a mounted Hono app)
+```
+
+Pair an exempt view with a `Content-Security-Policy: frame-ancestors …` header if only some
+origins may frame it.
+
 ### `GZipMiddleware` (core)
 
 Compresses responses on Node. On Workers it does nothing, because Cloudflare compresses at the
