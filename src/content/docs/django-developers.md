@@ -239,6 +239,24 @@ export class Post extends Model({
 | `rest_framework.authtoken` | `TokenAuthentication`, `obtainAuthToken` from `@ghuri/auth/rest` |
 | `djangorestframework-simplejwt` | `JWTAuthentication`, `TokenObtainPairView` from `@ghuri/auth/rest` |
 
+## GraphQL (graphene-django)
+
+| graphene-django | Ghuri (`@ghuri/graphql`) |
+|---|---|
+| `class PostType(DjangoObjectType): class Meta: model = Post; fields = (...)` | `class PostType extends ModelType { static Meta = { model: Post, fields: [...] } }` |
+| `def resolve_title(self, info)` | `static resolveTitle(post, args, info)` |
+| `get_queryset(cls, queryset, info)` | `static getQueryset(qs, info)` |
+| `class Query(graphene.ObjectType)` per app, combined by inheritance | `class BlogQuery extends Query` + `new Schema({ query: [BlogQuery, …] })` |
+| `relay.Node`, `DjangoFilterConnectionField(PostType)` + `filter_fields` | `interfaces: [Node]`, `ConnectionField(PostType)` + `Meta.filterFields` |
+| `allPosts(title_Icontains: "x")` | `allPosts(filter: { title: { icontains: "x" } }, orderBy: ["-createdAt"])` |
+| `SerializerMutation` with `serializer_class` | `SerializerMutation` with `serializerClass` (your REST serializer and permission classes) |
+| `GraphQLView.as_view(graphiql=True)` | `GraphQLView.asView({ graphiql: true })` |
+| `GRAPHENE = {'SCHEMA': 'mysite.schema.schema'}` | `GRAPHQL: { SCHEMA: schema }` |
+| `./manage.py graphql_schema` | `npx ghuri graphql_schema` |
+| `@login_required` (django-graphql-jwt) | `loginRequired(resolver)` |
+
+See [GraphQL](/docs/topics/graphql/).
+
 ## Auth
 
 | Django | Ghuri |

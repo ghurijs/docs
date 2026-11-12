@@ -253,6 +253,31 @@ AGENTS: {
 
 See [AI agents and MCP](/docs/topics/agents/).
 
+## GraphQL (`@ghuri/graphql`)
+
+```ts
+GRAPHQL: {
+  SCHEMA: schema,
+  AUTHENTICATION_CLASSES: [TokenAuthentication, SessionAuthentication],
+  MAX_DEPTH: 10,
+  RELAY_CONNECTION_MAX_LIMIT: 50,
+},
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `SCHEMA` | `Schema \| GraphQLSchema \| () => …` | none | Default schema of `GraphQLView` and `ghuri graphql_schema`. graphene-django's `GRAPHENE['SCHEMA']`, but the object itself, not a dotted path. |
+| `GRAPHIQL` | `boolean` | `DEBUG` | Serve GraphiQL to browsers at the view's URL. |
+| `MAX_DEPTH` | `number` | unlimited | Reject operations nested deeper than this. |
+| `MAX_COMPLEXITY` | `number` | unlimited | Reject operations whose estimated cost is higher (`first` / `last` multiply nested costs). |
+| `INTROSPECTION` | `boolean` | `true` | Allow introspection queries (`__schema`, `__type`). |
+| `RELAY_CONNECTION_MAX_LIMIT` | `number` | `100` | Maximum `first` / `last` of connections, and the page size when neither is given. |
+| `BATCH` | `boolean` | `false` | Accept arrays of operations in one request. |
+| `AUTHENTICATION_CLASSES` | `AuthenticationClass[]` | none (the user from `AuthenticationMiddleware`) | Authentication for `GraphQLView`, e.g. the classes from `@ghuri/auth/rest`. Session-authenticated `POST`s must carry the CSRF token. |
+| `OPTIMIZE` | `boolean` | `false` | Apply the query optimizer (`selectRelated` / `prefetchRelated`) to every root list and connection. |
+
+`GraphQLView.asView({ … })` options override these per view. See [GraphQL](/docs/topics/graphql/).
+
 ## Reading settings in your code
 
 ```ts

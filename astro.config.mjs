@@ -73,6 +73,7 @@ export default defineConfig({
                 { slug: 'topics/rest/openapi' },
               ],
             },
+            { slug: 'topics/graphql' },
             { slug: 'topics/authentication' },
             { slug: 'topics/auth-tokens' },
             { slug: 'topics/file-storage' },

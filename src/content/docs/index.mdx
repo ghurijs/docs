@@ -21,7 +21,7 @@ import { Card, CardGrid, LinkCard, Steps, Tabs, TabItem } from '@astrojs/starlig
 ## Start on the edge, grow without a rewrite
 
 Ghuri gives you the shape of Django (settings, installed apps, models with managers,
-migrations, `urls.ts`, class-based views, an admin, a REST framework) written in strict
+migrations, `urls.ts`, class-based views, an admin, a REST framework, GraphQL) written in strict
 TypeScript and built on [Hono](https://hono.dev) and [Drizzle](https://orm.drizzle.team).
 
 A new project runs on **Cloudflare Workers with D1, R2 and KV**. That costs close to nothing
@@ -64,6 +64,10 @@ const recent = await Post.objects
   <Card title="REST framework" icon="puzzle">
     Serializers, viewsets, routers, permissions, pagination, filtering, throttling and an
     OpenAPI 3.1 schema. If you know DRF you already know the API.
+  </Card>
+  <Card title="GraphQL" icon="seti:graphql">
+    graphene-django style types from your models, Relay connections with filters, mutations
+    that reuse your REST serializers and permissions, DataLoaders and GraphiQL.
   </Card>
   <Card title="Auth" icon="padlock">
     Users, groups and permissions, sessions, tokens and JWT. Password hashes use Django's
@@ -134,5 +138,6 @@ The only lines that change when you leave Cloudflare are in `settings.ts` and th
   <LinkCard title="Install Ghuri" href="/docs/getting-started/installation/" description="Requirements and your first project." />
   <LinkCard title="Tutorial: build a blog" href="/docs/tutorial/part-1-models/" description="Models, migrations, admin, REST API, deploy." />
   <LinkCard title="Ghuri for Django developers" href="/docs/django-developers/" description="Python and TypeScript, side by side." />
+  <LinkCard title="GraphQL" href="/docs/topics/graphql/" description="graphene-django style APIs from your models and serializers." />
   <LinkCard title="Migrating from D1 to Postgres" href="/docs/deployment/d1-to-postgres/" description="The escape hatch, step by step." />
 </CardGrid>

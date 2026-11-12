@@ -450,7 +450,9 @@ await client.login({ username: 'ann', password: 'pw' })   // true / false
 await client.logout()
 ```
 
-After flushing a test database, call `ContentType.objects.clearCache()`.
+A test database's `flush()` sends `postMigrate`, which recreates the content types and default
+permissions (clearing the `ContentType` cache first), so no manual `createPermissions()` or
+`ContentType.objects.clearCache()` is needed between tests.
 
 ## Settings
 

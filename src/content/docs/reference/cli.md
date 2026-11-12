@@ -76,7 +76,7 @@ the fallback.
 ### `startproject`
 
 ```sh
-npx ghuri startproject <name> [directory] [--db d1|postgres|sqlite] [--pm npm|pnpm|bun|yarn] [--no-install]
+npx ghuri startproject <name> [directory] [--db d1|postgres|sqlite] [--pm npm|pnpm|bun|yarn] [--graphql] [--no-install]
 ```
 
 Creates a new project. It works outside a project; `npm create ghuri@latest` runs it for you.
@@ -88,6 +88,7 @@ It generates a random `SECRET_KEY` into `.dev.vars`.
 | `directory` | `./<name>` | Where to create it (must be empty or missing). |
 | `--db` | `d1` | `d1`: Cloudflare D1 + R2. `postgres`: Hyperdrive on Workers, `DATABASE_URL` elsewhere. `sqlite`: a Node project with better-sqlite3 and file storage, no wrangler. |
 | `--pm` | the one running the command, else `npm` | Package manager for install and the printed next steps. |
+| `--graphql` | off | Add [GraphQL](/docs/topics/graphql/): `@ghuri/graphql` and `graphql` dependencies, `GraphQLConfig` in `INSTALLED_APPS`, `src/schema.ts` as `GRAPHQL.SCHEMA` and `GraphQLView` at `/graphql/`. |
 | `--no-install` | | Do not install dependencies. |
 
 ### `startapp`
@@ -97,7 +98,7 @@ npx ghuri startapp <name> [directory] [--no-register]
 ```
 
 Creates `src/<name>/` with `app.ts`, `models.ts`, `views.ts`, `urls.ts`, `serializers.ts`,
-`admin.ts`, `tests.ts` and `migrations/index.ts`, and adds the generated `AppConfig`
+`schema.ts` (a commented GraphQL example), `admin.ts`, `tests.ts` and `migrations/index.ts`, and adds the generated `AppConfig`
 (`<Name>Config`) to `INSTALLED_APPS` in your settings (an import plus a list entry) when the
 settings file has the usual shape. It prints the `path(...)` line to add to `src/urls.ts`.
 
@@ -422,6 +423,26 @@ npx ghuri flushexpiredtokens
 ```
 
 Deletes expired JWT refresh tokens from the outstanding-token list.
+
+## GraphQL commands
+
+### `graphql_schema` (`GraphQLConfig`)
+
+```sh
+npx ghuri graphql_schema [-o, --out <file>] [--json] [--sort] [--indent <n>]
+```
+
+Prints the schema of `GRAPHQL.SCHEMA` (graphene-django's `graphql_schema`). Add `GraphQLConfig`
+from `@ghuri/graphql` to `INSTALLED_APPS` to get it.
+
+| Option | Meaning |
+|---|---|
+| `-o`, `--out <file>` | Write to this file instead of stdout. |
+| `--json` | Output the introspection result as JSON (for client code generators) instead of SDL. |
+| `--sort` | Sort types and fields alphabetically. |
+| `--indent <n>` | Indentation of the JSON output (default 2). |
+
+See [GraphQL](/docs/topics/graphql/#the-graphql_schema-command).
 
 ---
 

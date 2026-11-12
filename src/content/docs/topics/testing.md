@@ -63,8 +63,10 @@ What each piece does:
   migrations of installed apps that have some and creates tables directly for every other model,
   then returns `{ connection, flush, teardown }`. `postMigrate` is sent, so default permissions
   and content types exist. Options: `alias`, `models` (limit the tables), `createTables: false`.
-- **`flush()`** empties every table but keeps the schema. Calling it in `afterEach` gives each
-  test a clean database without re-running migrations.
+- **`flush()`** empties every table but keeps the schema, then sends `postMigrate` like
+  `ghuri flush`, so post-migrate data (content types, default permissions) is recreated.
+  Calling it in `afterEach` gives each test a clean database without re-running migrations.
+  `flush({ inhibitPostMigrate: true })` leaves every table empty.
 - **`teardown()`** closes the test database and restores the previous `DATABASES`.
 
 :::tip[If you know Django]
