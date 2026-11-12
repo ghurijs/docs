@@ -257,6 +257,23 @@ export class Post extends Model({
 
 See [GraphQL](/docs/topics/graphql/).
 
+## Channels (WebSockets)
+
+| Django Channels | Ghuri (`@ghuri/realtime`) |
+|---|---|
+| `class ChatConsumer(AsyncJsonWebsocketConsumer)` | `class ChatConsumer extends JsonWebSocketConsumer` |
+| `websocket_urlpatterns` + `URLRouter` in `asgi.py` | `path('ws/chat/<slug:room>/', ChatConsumer.asView())` in `urls.ts` |
+| `AuthMiddlewareStack`, `AllowedHostsOriginValidator` | `MIDDLEWARE` runs on the handshake; the Origin check is built in |
+| `self.scope['user']`, `self.scope['url_route']['kwargs']` | `this.user`, `this.scope.params` |
+| `group_add(group, self.channel_name)` in `connect` | `static room = (scope) => …` (one room per socket) |
+| `channel_layer.group_send(group, {'type': 'chat.message', …})` | `channelLayer.groupSend(room, { type: 'chat.message', … })` |
+| `async def chat_message(self, event)` | `async chatMessage(event)` |
+| `CHANNEL_LAYERS` (Redis) | `REALTIME: { LAYER: durableObjectLayer('REALTIME') }` |
+| `WebsocketCommunicator` | `WebSocketCommunicator` from `@ghuri/realtime/testing` |
+
+Consumers are rebuilt for every event (Durable Objects hibernate), so keep per-connection data in
+`this.state`, not on `this`. See [WebSockets](/docs/topics/websockets/).
+
 ## Auth
 
 | Django | Ghuri |

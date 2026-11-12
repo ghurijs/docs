@@ -114,6 +114,19 @@ directly with [jiti](https://github.com/unjs/jiti) (a dependency of the generate
 build step. During development, `npx ghuri runserver --node` serves the same app in-process on
 port 8000 with the CLI's environment (`.dev.vars`, `.env` files, local Wrangler bindings).
 
+If you use [WebSockets](/docs/topics/websockets/), attach them to the server `serve()` returns:
+
+```ts title="src/server.ts"
+import { attachRealtime } from '@ghuri/realtime/node'
+
+const app = createApp(settings)
+const server = await serve(app, { port: Number(process.env.PORT ?? 8000), env: process.env })
+attachRealtime(server, app, { env: process.env })
+```
+
+Rooms then live in this process (`memoryLayer()`), so run **one** Node process per site until a
+shared layer is available.
+
 ## 3. Build or run TypeScript directly?
 
 `npm start` works in production as it is. If you prefer a compiled artefact, build a single ESM
@@ -240,12 +253,23 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSockets (@ghuri/realtime)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 1h;
     }
+}
+
+# in the http {} block (for example /etc/nginx/conf.d/upgrade.conf)
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
 }
 ```
 
-Pass the original `Host` header through: `ALLOWED_HOSTS` and the CSRF origin check compare
-against it.
+Pass the original `Host` header through: `ALLOWED_HOSTS`, the CSRF origin check and the WebSocket
+origin check compare against it. Caddy proxies WebSocket upgrades without extra configuration.
 
 ## Security checklist
 

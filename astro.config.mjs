@@ -74,6 +74,7 @@ export default defineConfig({
               ],
             },
             { slug: 'topics/graphql' },
+            { slug: 'topics/websockets' },
             { slug: 'topics/authentication' },
             { slug: 'topics/auth-tokens' },
             { slug: 'topics/file-storage' },

@@ -298,6 +298,36 @@ only fire on Workers; on Node, call the same code from a
 [management command](/docs/topics/management-commands/) run by cron. See
 [Background tasks](/docs/topics/background-tasks/).
 
+## WebSockets (Durable Objects)
+
+With [`@ghuri/realtime`](/docs/topics/websockets/), each room is a Durable Object. Export the class
+next to the app and bind it:
+
+```ts title="src/index.ts"
+import { createApp } from '@ghuri/core'
+import { createRoomClass } from '@ghuri/realtime/cloudflare'
+import settings from './settings'
+
+const app = createApp(settings)
+export default app
+export const GhuriRoom = createRoomClass(app)
+```
+
+```jsonc title="wrangler.jsonc"
+"durable_objects": {
+  "bindings": [{ "name": "REALTIME", "class_name": "GhuriRoom" }]
+},
+"migrations": [{ "tag": "realtime-v1", "new_sqlite_classes": ["GhuriRoom"] }]
+```
+
+```ts title="src/settings.ts"
+REALTIME: { LAYER: durableObjectLayer('REALTIME') },   // from '@ghuri/realtime/cloudflare'
+```
+
+`wrangler deploy` creates the Durable Object class from the migration; no resource needs to be
+created by hand. Keep the migration entry once deployed, and add new tags rather than editing it.
+Open sockets drop on every deploy, so clients should reconnect with a backoff.
+
 ## Limits worth knowing
 
 | Concern | What to do |
@@ -306,6 +336,7 @@ only fire on Workers; on Node, call the same code from a
 | Worker CPU time limits | Keep heavy work (image processing, big exports) out of request handlers. |
 | D1 database size limits | When you approach them, [move to Postgres](/docs/deployment/d1-to-postgres/). |
 | No filesystem | Use `r2()` storage; `@ghuri/storage/fs` is Node only. |
+| One room is one Durable Object | A few thousand WebSocket connections per room; use `broadcast` rather than `groupSend` in large rooms. See [WebSockets](/docs/topics/websockets/#running-on-cloudflare). |
 
 ## See also
 

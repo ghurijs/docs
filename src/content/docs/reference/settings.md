@@ -278,6 +278,27 @@ GRAPHQL: {
 
 `GraphQLView.asView({ … })` options override these per view. See [GraphQL](/docs/topics/graphql/).
 
+## Realtime (`@ghuri/realtime`)
+
+```ts
+REALTIME: {
+  LAYER: durableObjectLayer('REALTIME'),
+  ALLOWED_ORIGINS: ['https://app.example.com'],
+  TOKEN_KEYWORD: 'Bearer',
+},
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `LAYER` | `LayerConfig` | `memoryLayer()` | Where rooms live: `durableObjectLayer(binding)` from `@ghuri/realtime/cloudflare` on Workers, `memoryLayer()` on Node (one process) and in tests. |
+| `ALLOWED_ORIGINS` | `string[]` | `[]` | Browser origins allowed to open sockets besides the request host and `CSRF_TRUSTED_ORIGINS`. `'https://*.example.com'` wildcards and `'*'` work. |
+| `TOKEN_SOURCES` | `('subprotocol' \| 'query')[]` | `['subprotocol']` | Where handshake tokens may come from: `Sec-WebSocket-Protocol: ghuri, bearer.<token>` and/or `?token=`. |
+| `TOKEN_KEYWORD` | `string` | `'Bearer'` | Keyword used when the token is copied into `Authorization` for `authenticationClasses` (`'Token'` for `TokenAuthentication`). |
+| `MAX_MESSAGE_BYTES` | `number` | `1048576` | Larger frames close the socket with 1009. |
+| `REVALIDATE_SECONDS` | `number` | `0` | Reload the user before an event when this many seconds passed since the last check; `0` checks only on the handshake. |
+
+See [WebSockets](/docs/topics/websockets/).
+
 ## Reading settings in your code
 
 ```ts
