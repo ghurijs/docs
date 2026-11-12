@@ -51,9 +51,11 @@ export class StandardPagination extends PageNumberPagination {
   pageSize = 25
   pageSizeQueryParam = 'page_size'   // lets clients ask for ?page_size=100
   maxPageSize = 100
-  lastPageStrings = ['last']         // ?page=last
+  lastPageStrings = ['last']         // ?page=last (the default)
 }
 ```
+
+`pageSize` defaults to `PAGE_SIZE`; when neither is set, the list is not paginated.
 
 An out-of-range page returns `404` with `{"detail": "Invalid page."}`.
 
@@ -77,9 +79,14 @@ import { CursorPagination } from '@ghuri/rest'
 
 export class PostCursorPagination extends CursorPagination {
   pageSize = 20
-  ordering = '-createdAt'    // must be a unique, unchanging column (or end with one)
+  ordering = '-createdAt'    // the default; must be a unique, unchanging column (or end with one)
 }
 ```
+
+`ordering` defaults to `'-createdAt'` (DRF uses `'-created'`), so set it when your model has no
+`createdAt` field. Double-underscore lookups are rejected. If the view has an `OrderingFilter`,
+the client's `?ordering=` is used instead. `pageSizeQueryParam` and `maxPageSize` work as on
+`PageNumberPagination`.
 
 ```json
 {
@@ -110,13 +117,13 @@ Generic views do this for you in `list`. In your own actions, call the hooks:
 
 ```ts
 @action({ detail: false })
-async drafts(c: Context) {
+async drafts(request: APIRequest) {
   const qs = this.filterQueryset(this.getQueryset().filter({ published: false }))
   const page = await this.paginateQueryset(qs)
   if (page) {
-    return this.getPaginatedResponse(await this.getSerializer(page, { many: true }).getData())
+    return this.getPaginatedResponse(await this.getSerializer({ instance: page, many: true }).getData())
   }
-  return new APIResponse(await this.getSerializer(qs, { many: true }).getData())
+  return new APIResponse(await this.getSerializer({ instance: qs, many: true }).getData())
 }
 ```
 
@@ -127,11 +134,25 @@ Override `getPaginatedResponse(data)` to change the response shape, and
 
 ```ts
 export class MetaPagination extends PageNumberPagination {
-  getPaginatedResponse(data: unknown[]) {
+  override getPaginatedResponse(data: unknown) {
     return new APIResponse({
       data,
-      meta: { total: this.page.count, page: this.page.number, pages: this.page.numPages },
+      meta: { total: this.count, page: this.pageNumber, pages: this.numPages },
     })
+  }
+
+  override getPaginatedResponseSchema(schema: JSONSchema): JSONSchema {
+    return {
+      type: 'object',
+      properties: {
+        data: schema,
+        meta: { type: 'object', properties: { total: { type: 'integer' }, page: { type: 'integer' }, pages: { type: 'integer' } } },
+      },
+    }
   }
 }
 ```
+
+`JSONSchema` is a type exported from `@ghuri/rest`. After `paginateQueryset()`, a
+`PageNumberPagination` exposes `count`, `pageNumber` and `numPages`; a `LimitOffsetPagination`
+exposes `count`, `limit` and `offset`.

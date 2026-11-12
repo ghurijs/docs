@@ -7,7 +7,7 @@ This tutorial builds a small blog: posts with tags and comments, an admin to wri
 JSON API to read them, and a deployment to Cloudflare. It follows the same arc as Django's
 "polls" tutorial, so if you have done that one, the steps will feel familiar.
 
-By the end of this part you will have a project, a `blog` app with one view, and three models.
+By the end of this part you will have a project, a `blog` app with two views, and three models.
 
 ## Create the project
 
@@ -15,38 +15,45 @@ Make sure you have Node.js 20 or later (see [Installation](/docs/getting-started
 then run:
 
 ```sh
-npm create ghuri@latest mysite
+npm create ghuri@latest mysite -- --db d1 --yes
 cd mysite
-cp .dev.vars.example .dev.vars
+npx ghuri migrate
 npm run dev
 ```
 
-Visit `http://localhost:8787/`. You should see `{"hello":"ghuri"}`, which comes from the home
-view in `src/urls.ts`. Leave the server running; it reloads when you save files.
+`--yes` accepts the defaults (npm, install dependencies, initialise git); leave it out to answer
+the questions yourself. `startproject` already wrote a `.dev.vars` with a random `SECRET_KEY`,
+and `migrate` created the tables for the built-in apps (content types, users, sessions, tokens
+and the admin log) in a local D1 database.
+
+Visit `http://localhost:8787/`. You should see
+`{"project":"mysite","admin":"/admin/","api":"/api/"}`, which comes from the home view in
+`src/urls.ts`. Leave the server running; it reloads when you save files.
 
 :::tip[If you know Django]
-This is `django-admin startproject mysite` followed by `python manage.py runserver`. The
-development server is `wrangler dev`, which runs your code in the same `workerd` runtime
-Cloudflare uses in production, with a local SQLite file standing in for D1.
+This is `django-admin startproject mysite` followed by `python manage.py migrate` and
+`python manage.py runserver`. The development server is `wrangler dev`, which runs your code in
+the same `workerd` runtime Cloudflare uses in production, with a local SQLite file standing in
+for D1.
 :::
 
 ## Create the blog app
 
 A project is a collection of apps. Each app is a directory under `src/` that owns some models,
-views and URLs. Create one:
+views and URLs. Create one (in a second terminal, from the project root):
 
 ```sh
 npx ghuri startapp blog
 ```
 
 This writes `src/blog/` with `app.ts`, `models.ts`, `views.ts`, `urls.ts`, `serializers.ts`,
-`admin.ts`, `tests.ts` and an empty `migrations/` package. Open `src/blog/app.ts`:
+`admin.ts`, `tests.ts` and a `migrations/index.ts`. Open `src/blog/app.ts`:
 
 ```ts title="src/blog/app.ts"
 import { AppConfig } from '@ghuri/core'
-import * as models from './models'
-import * as migrations from './migrations'
 import * as admin from './admin'
+import * as migrations from './migrations'
+import * as models from './models'
 
 export class BlogConfig extends AppConfig {
   name = 'blog'
@@ -63,30 +70,36 @@ filesystem, apps import their own modules instead of having Ghuri discover them 
 whatever `models.ts` exports becomes the app's models, and importing `admin.ts` registers its
 admin classes. `path` is only used by the CLI, to know where to write migration files.
 
-Install the app by adding it to `INSTALLED_APPS`:
+`startapp` also installed the app for you: it added the import and the list entry to
+`src/settings.ts`.
 
-```ts title="src/settings.ts" ins={6,13}
-import { defineSettings, SecurityMiddleware, CommonMiddleware, CsrfMiddleware, kvCache } from '@ghuri/core'
-import { d1, postgres } from '@ghuri/orm'
+```ts title="src/settings.ts" ins={4,14}
+// ...
 import { r2 } from '@ghuri/storage'
-import { AuthConfig, SessionMiddleware, AuthenticationMiddleware } from '@ghuri/auth'
-import { AdminConfig } from '@ghuri/admin'
-import { BlogConfig } from './blog/app'
 import { urlpatterns } from './urls'
+import { BlogConfig } from './blog/app'
 
 export default defineSettings((env) => ({
-  SECRET_KEY: env.SECRET_KEY,
-  DEBUG: env.DEBUG === 'true',
-  ALLOWED_HOSTS: ['*'],
-  INSTALLED_APPS: [AuthConfig, AdminConfig, BlogConfig],
+  // ...
+  INSTALLED_APPS: [
+    ContentTypesConfig,
+    AuthConfig,
+    SessionsConfig,
+    AuthTokenConfig,
+    AdminConfig,
+    BlogConfig,
+  ],
   // ...the rest is unchanged
 }))
 ```
 
+If your settings file does not have the usual shape, `startapp` prints the two lines to add
+instead.
+
 ## Write your first view
 
 Views are functions that receive a [Hono `Context`](https://hono.dev/docs/api/context) and
-return a `Response`. Open `src/blog/views.ts`:
+return a `Response`. `startapp` created one in `src/blog/views.ts`; change its body:
 
 ```ts title="src/blog/views.ts"
 import type { Context } from 'hono'
@@ -96,61 +109,74 @@ export function index(c: Context) {
 }
 ```
 
-Wire it to a URL in the app's own URLconf:
+The app's own URLconf, `src/blog/urls.ts`, already maps it:
 
 ```ts title="src/blog/urls.ts"
-import { path } from '@ghuri/core'
-import * as views from './views'
+import { path, urlpatterns as patterns } from '@ghuri/core'
+import { index } from './views'
 
-export const appName = 'blog'
-
-export const urlpatterns = [
-  path('', views.index, { name: 'index' }),
-]
+export const urlpatterns = patterns('blog', [
+  path('', index, { name: 'index' }),
+])
 ```
 
-Then include the app's patterns from the root URLconf:
+`urlpatterns('blog', [...])` (imported here as `patterns`) builds a pattern list with an
+`appName`, Django's `app_name = 'blog'`. Include the app's patterns from the root URLconf:
 
-```ts title="src/urls.ts" ins={3,7}
-import { path, include, json } from '@ghuri/core'
+```ts title="src/urls.ts" ins={5,18}
 import { admin } from '@ghuri/admin'
-import * as blog from './blog/urls'
+import { include, path } from '@ghuri/core'
+import { DefaultRouter } from '@ghuri/rest'
+import type { Context } from 'hono'
+import { urlpatterns as blogUrls } from './blog/urls'
+
+/** REST API router: register viewsets here, e.g. `router.register('posts', PostViewSet)`. */
+export const router = new DefaultRouter()
+
+function home(c: Context) {
+  return c.json({ project: 'mysite', admin: '/admin/', api: '/api/' })
+}
 
 export const urlpatterns = [
-  path('', (c) => json(c, { hello: 'ghuri' }), { name: 'home' }),
-  path('blog/', include(blog)),
+  path('', home, { name: 'home' }),
   path('admin/', admin.site.urls),
+  path('api/', include(router.urls)),
+  path('blog/', include(blogUrls)),
 ]
 ```
 
 Visit `http://localhost:8787/blog/` and you will see the greeting.
 
-`include()` accepts a pattern array, or (as here) a module that exports `urlpatterns` and
-optionally `appName`. Exporting `appName = 'blog'` puts the app's URL names in the `blog`
-namespace, so elsewhere you can write `reverse('blog:index')`. Routes use Django's syntax:
-`'posts/<int:id>/'` matches `/posts/42/` and gives you `id` as a number. Read more in
+`include()` accepts a pattern array or a module that exports `urlpatterns`. Because the blog
+patterns carry `appName = 'blog'`, their URL names live in the `blog` namespace, so elsewhere
+you can write `reverse('blog:index')`. Routes use Django's syntax: `'posts/<int:id>/'` matches
+`/posts/42/` and gives you `id` as a number. Read more in
 [URLs and views](/docs/topics/urls-and-views/).
 
 :::tip[If you know Django]
-`path()`, `include()`, `reverse()`, namespaces, `appName` (Django's `app_name`) and the
-`<int:id>` converters all behave as in Django. The only change is that a view takes Hono's
-`Context` (`c`) instead of an `HttpRequest`, and you reach the request through `c.req`.
+`path()`, `include()`, `reverse()`, namespaces, `app_name` (here the first argument of
+`urlpatterns()`) and the `<int:id>` converters all behave as in Django. The only change is that
+a view takes Hono's `Context` (`c`) instead of an `HttpRequest`, and you reach the request
+through `c.req`.
 :::
 
 ## Define models
 
-Now the interesting part. A blog needs posts, tags and comments. Open `src/blog/models.ts`:
+Now the interesting part. A blog needs posts, tags and comments. `src/blog/models.ts` contains a
+commented-out example; replace it with:
 
 ```ts title="src/blog/models.ts"
 import {
-  Model, CharField, SlugField, TextField, BooleanField, DateTimeField,
-  ForeignKey, ManyToManyField, CASCADE, Manager,
+  BooleanField, CASCADE, CharField, DateTimeField, ForeignKey, Manager, ManyToManyField, Model,
+  type RelatedManager, SlugField, TextField,
 } from '@ghuri/orm'
 import { User } from '@ghuri/auth'
 
 export class Tag extends Model({
   name: new CharField({ maxLength: 50, unique: true }),
 }) {
+  declare static objects: Manager<Tag>
+
   toString() {
     return this.name
   }
@@ -168,6 +194,7 @@ export class Post extends Model({
 }) {
   static Meta = { ordering: ['-createdAt'] }
   declare static objects: Manager<Post>
+  declare comments: RelatedManager<Comment>
 
   toString() {
     return this.title
@@ -182,6 +209,7 @@ export class Comment extends Model({
   createdAt: new DateTimeField({ autoNowAdd: true }),
 }) {
   static Meta = { ordering: ['createdAt'] }
+  declare static objects: Manager<Comment>
 
   toString() {
     return `Comment by ${this.authorId} on ${this.postId}`
@@ -203,9 +231,12 @@ A few things to notice:
   declaration order. A string such as `'auth.User'` also works.
 - **A foreign key has two properties on instances**: `post.authorId` is the raw id, and
   `await post.author` loads the related `User`.
-- **`declare static objects: Manager<Post>`** is optional. Every model has an `objects`
-  manager; the `declare` line only tells TypeScript that queries return `Post` instances with
-  your custom methods, instead of the generic base type.
+- **Reverse relations** get the name in `relatedName` (`user.posts`, `post.comments`). Without
+  one, the default is camelCase `<modelName>Set`, so it would be `user.postSet`.
+- **`declare` lines are for TypeScript only.** Every model has an `objects` manager;
+  `declare static objects: Manager<Post>` tells TypeScript that queries return `Post` instances
+  with your methods, and `declare comments: RelatedManager<Comment>` types the reverse side of
+  `Comment.post`. Use `declare`, never a class field with an initializer.
 
 :::tip[If you know Django]
 This is almost a transliteration of a Django `models.py`. `class Meta:` becomes
@@ -221,8 +252,8 @@ registered to the `blog` app automatically. Their database tables will be called
 ## Try the models in a view
 
 Models do nothing until their tables exist, which is the subject of
-[Part 2](/docs/tutorial/part-2-migrations/). But you can already write the view that will list
-published posts. Replace `src/blog/views.ts`:
+[Part 2](/docs/tutorial/part-2-migrations/). But you can already write the views that will list
+published posts and show one. Replace `src/blog/views.ts`:
 
 ```ts title="src/blog/views.ts"
 import type { Context } from 'hono'
@@ -249,22 +280,26 @@ export async function detail(c: Context) {
 }
 ```
 
-```ts title="src/blog/urls.ts" ins={8}
-import { path } from '@ghuri/core'
-import * as views from './views'
+```ts title="src/blog/urls.ts" ins={6}
+import { path, urlpatterns as patterns } from '@ghuri/core'
+import { detail, index } from './views'
 
-export const appName = 'blog'
-
-export const urlpatterns = [
-  path('', views.index, { name: 'index' }),
-  path('<slug:slug>/', views.detail, { name: 'detail' }),
-]
+export const urlpatterns = patterns('blog', [
+  path('', index, { name: 'index' }),
+  path('<slug:slug>/', detail, { name: 'detail' }),
+])
 ```
 
 Every database call is `async`: a QuerySet is lazy, and nothing touches the database until you
 `await` it. `selectRelated('author')` fetches each post's author in the same query, so
 `await p.author` does not hit the database again. `getObjectOr404` raises `Http404` when nothing
 matches, which Ghuri turns into a 404 response.
+
+:::note
+`src/blog/tests.ts`, which `startapp` generated, checks that `index` returns
+`{ app: 'blog' }`. It no longer does; you will replace that test in
+[Part 4](/docs/tutorial/part-4-rest-api/#testing-the-api).
+:::
 
 If you reload `/blog/` now you will get an error about a missing `blog_post` table. That is
 expected. Continue to [Part 2: Migrations](/docs/tutorial/part-2-migrations/).

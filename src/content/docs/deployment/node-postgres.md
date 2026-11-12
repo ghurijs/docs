@@ -20,7 +20,10 @@ inside the package and loads htmx from a CDN (override with `ADMIN_ASSETS`).
 
 ## 1. Settings for Node
 
-Make the adapters depend on the environment so the same file works in both places:
+A project generated with `--db d1` already switches `DATABASES` to Postgres when `DATABASE_URL`
+is set, and its cache falls back to `memoryCache()` without a `CACHE` binding. Storage is the one
+thing you must change: `r2('MEDIA')` needs a Worker binding, which Node does not have. Make the
+adapters depend on the environment so the same file works in both places:
 
 ```ts title="src/settings.ts"
 import { defineSettings, kvCache, memoryCache } from '@ghuri/core'
@@ -30,7 +33,7 @@ import { r2, s3 } from '@ghuri/storage'
 export default defineSettings((env) => ({
   SECRET_KEY: env.SECRET_KEY,
   DEBUG: env.DEBUG === 'true',
-  ALLOWED_HOSTS: (env.ALLOWED_HOSTS ?? '*').split(','),
+  ALLOWED_HOSTS: env.ALLOWED_HOSTS ? String(env.ALLOWED_HOSTS).split(',') : ['*'],
   CSRF_TRUSTED_ORIGINS: env.CSRF_TRUSTED_ORIGINS ? env.CSRF_TRUSTED_ORIGINS.split(',') : [],
   // …INSTALLED_APPS, MIDDLEWARE, ROOT_URLCONF as before
   DATABASES: {
@@ -77,7 +80,10 @@ Notes on each adapter:
 :::caution
 Importing `@ghuri/storage/fs` or `@ghuri/orm/sqlite` pulls in Node-only modules. Do not import
 them from a settings file that is also bundled for Workers; keep a separate
-`settings.node.ts` or use a dynamic `import()` if you need both.
+`settings.node.ts` or use a dynamic `import()` if you need both. A project created with
+`--db sqlite` is Node-only and already uses both (`sqlite({ filename })` and
+`fileSystemStorage({ location: 'media', baseUrl: '/media/' })`), with Postgres when
+`DATABASE_URL` is set.
 :::
 
 ## 2. The entry file
@@ -93,17 +99,25 @@ serve(createApp(settings), {
 })
 ```
 
-`serve()` passes `process.env` as `env`, so `env.DATABASE_URL` in settings is
-`process.env.DATABASE_URL`. Try it locally:
+This is the generated `src/server.ts`. `serve()` from `@ghuri/core/node` runs the app on
+`@hono/node-server`, binds `0.0.0.0` by default (`hostname: '127.0.0.1'` for local only), gives
+`waitUntil()` a Node implementation, and closes gracefully on `SIGINT` / `SIGTERM`. It passes
+`process.env` as `env`, so `env.DATABASE_URL` in settings is `process.env.DATABASE_URL`. Try it
+locally:
 
 ```sh
-DATABASE_URL=postgres://localhost/mysite npx ghuri runserver --node
+DATABASE_URL=postgres://localhost/mysite SECRET_KEY=dev npm start
 ```
+
+`npm start` is `node --import jiti/register src/server.ts`: it runs the TypeScript sources
+directly with [jiti](https://github.com/unjs/jiti) (a dependency of the generated project), no
+build step. During development, `npx ghuri runserver --node` serves the same app in-process on
+port 8000 with the CLI's environment (`.dev.vars`, `.env` files, local Wrangler bindings).
 
 ## 3. Build or run TypeScript directly?
 
-You can run `src/server.ts` directly with `tsx`, or compile it to JavaScript first. **We
-recommend building** a single ESM bundle with tsup:
+`npm start` works in production as it is. If you prefer a compiled artefact, build a single ESM
+bundle with tsup:
 
 ```sh
 npm install -D tsup
@@ -116,16 +130,19 @@ npm install -D tsup
 }
 ```
 
-Why: the production process starts faster, does not need a TypeScript loader or your dev
-dependencies at runtime, and fails at build time rather than at boot if an import is broken.
+Why: the production process starts faster, does not need a TypeScript loader at runtime, and
+fails at build time rather than at boot if an import is broken. esbuild (inside tsup) also lowers
+the standard decorators that `@admin.register` and `@action` use.
 Keep `pg`-family drivers and other native or Node-only packages external (tsup leaves
 `dependencies` external by default), and keep `node_modules` installed with
 `npm ci --omit=dev`.
 
 The `ghuri` CLI is different: it loads your TypeScript sources with jiti every time, so
-management commands such as `migrate` need the `src/` directory and `@ghuri/cli` on the machine
-that runs them. Either keep the repository checkout on the server (simplest) or run migrations
-from CI against the production `DATABASE_URL`.
+management commands such as `migrate` need the `src/` directory and `@ghuri/cli` (a dev
+dependency in the generated `package.json`) on the machine that runs them. Either keep the
+repository checkout and dev dependencies on the server (simplest) or run migrations from CI
+against the production `DATABASE_URL`. Without a wrangler config, or without Wrangler
+installed, the CLI builds `env` from `process.env` and `.env` files only.
 
 ## 4. Prepare the server
 
@@ -176,6 +193,7 @@ User=mysite
 WorkingDirectory=/srv/mysite
 EnvironmentFile=/etc/mysite.env
 ExecStart=/usr/bin/node dist/server.js
+# without a build step: ExecStart=/usr/bin/node --import jiti/register src/server.ts
 Restart=on-failure
 RestartSec=2
 
@@ -239,8 +257,8 @@ against it.
 | `CSRF_TRUSTED_ORIGINS` | `https://` origins of every site that posts forms to you |
 | `CORS` | `false` unless a browser app on another origin calls your API |
 
-Run `npx ghuri check` after changing settings; it runs the same checks the app runs at startup
-in debug mode.
+Run `npx ghuri check --deploy` after changing settings; it runs the checks the app runs at
+startup in debug mode plus the production ones.
 
 ## See also
 

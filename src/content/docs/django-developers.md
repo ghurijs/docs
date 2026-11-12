@@ -35,7 +35,11 @@ Almost every difference comes from five mechanical rules:
 | `python manage.py createsuperuser` | `npx ghuri createsuperuser` |
 | `python manage.py shell` | `npx ghuri shell` (top-level `await` works) |
 | `python manage.py dumpdata > data.json` | `npx ghuri dumpdata > data.json` |
+| `python manage.py loaddata data.json --database pg` | `npx ghuri loaddata data.json --database pg` |
+| (dump + load between two aliases) | `npx ghuri copydata --from default --to pg` |
 | `python manage.py test` | `npx ghuri test` (Vitest) |
+| `python manage.py show_urls` (django-extensions) | `npx ghuri routes` |
+| `python manage.py check --deploy` | `npx ghuri check --deploy` |
 | `DJANGO_SETTINGS_MODULE` | `"ghuri": { "settings": "src/settings.ts" }` in `package.json` |
 | `settings.py`, `urls.py`, `wsgi.py` | `settings.ts`, `urls.ts`, `index.ts` (Workers) / `server.ts` (Node) |
 | `apps.py`, `models.py`, `admin.py` | `app.ts`, `models.ts`, `admin.ts` |
@@ -46,7 +50,10 @@ Almost every difference comes from five mechanical rules:
 ```python title="settings.py"
 SECRET_KEY = os.environ['SECRET_KEY']
 DEBUG = os.environ.get('DEBUG') == '1'
-INSTALLED_APPS = ['django.contrib.auth', 'django.contrib.admin', 'blog']
+INSTALLED_APPS = [
+    'django.contrib.contenttypes', 'django.contrib.auth', 'django.contrib.sessions',
+    'rest_framework.authtoken', 'django.contrib.admin', 'blog',
+]
 ROOT_URLCONF = 'mysite.urls'
 DATABASES = {'default': dj_database_url.config()}
 ```
@@ -55,7 +62,7 @@ DATABASES = {'default': dj_database_url.config()}
 export default defineSettings((env) => ({
   SECRET_KEY: env.SECRET_KEY,
   DEBUG: env.DEBUG === 'true',
-  INSTALLED_APPS: [AuthConfig, AdminConfig, BlogConfig],
+  INSTALLED_APPS: [ContentTypesConfig, AuthConfig, SessionsConfig, AuthTokenConfig, AdminConfig, BlogConfig],
   ROOT_URLCONF: urlpatterns,
   DATABASES: { default: env.DATABASE_URL ? postgres({ url: env.DATABASE_URL }) : d1('DB') },
 }))
@@ -66,6 +73,9 @@ export default defineSettings((env) => ({
 | `from django.conf import settings; settings.DEBUG` | `getSettings().DEBUG` |
 | `getattr(settings, 'X', default)` | `setting('X', default)` |
 | `os.environ['KEY']` | `env.KEY` in settings, `getEnv().KEY` elsewhere |
+| `'django.contrib.auth'` and friends | `ContentTypesConfig`, `AuthConfig`, `SessionsConfig` from `@ghuri/auth` |
+| `'rest_framework.authtoken'` | `AuthTokenConfig` from `@ghuri/auth` |
+| `'django.contrib.admin'` | `AdminConfig` from `@ghuri/admin` |
 
 ## Models
 
@@ -102,7 +112,8 @@ export class Post extends Model({
 | `models.CASCADE` | `CASCADE` (import from `@ghuri/orm`) |
 | `post.author_id` | `post.authorId` |
 | `post.author` | `await post.author` |
-| `user.post_set.all()` | `await user.postSet.all()` (or the `relatedName`) |
+| `user.post_set.all()` | `await user.postSet.all()` (camelCase; or the `relatedName`) |
+| `filter(post__title='x')` (reverse lookup) | `filter({ post__title: 'x' })` |
 | `post.save(update_fields=['title'])` | `await post.save({ updateFields: ['title'] })` |
 | `post.full_clean()` | `await post.fullClean()` |
 | `Post._meta.get_field('title')` | `Post._meta.getField('title')` |
@@ -130,7 +141,8 @@ export class Post extends Model({
 | `obj, created = get_or_create(slug=s, defaults={...})` | `const [obj, created] = await getOrCreate({ slug: s }, { defaults: {...} })` |
 | `bulk_create([...])` | `await bulkCreate([...])` |
 | `qs.update(published=True)` | `await qs.update({ published: true })` |
-| `qs.delete()` | `await qs.delete()` |
+| `total, per_model = qs.delete()` | `const [total, perModel] = await qs.delete()` |
+| `qs.in_bulk([1, 2])` (a `dict`) | `await qs.inBulk([1, 2])` (a `Map`) |
 | `Q(a=1) \| Q(b=2)` | `Q({ a: 1 }).or(Q({ b: 2 }))` |
 | `Q(a=1) & ~Q(c=3)` | `Q({ a: 1 }).and(Q.not({ c: 3 }))` |
 | `F('views') + 1` | `F('views').add(1)` |
@@ -139,7 +151,7 @@ export class Post extends Model({
 | `select_related('author')` | `selectRelated('author')` |
 | `prefetch_related('tags')` | `prefetchRelated('tags')` |
 | `for p in qs:` | `for await (const p of qs)` or `for (const p of await qs)` |
-| `with transaction.atomic():` | `await atomic(async () => { ... })` |
+| `with transaction.atomic():` | `await atomic(async () => { ... })` (no rollback on D1, see below) |
 | `transaction.on_commit(fn)` | `onCommit(fn)` |
 | `connection.cursor().execute(sql, params)` | `(await connections.get()).execute(sql, params)` |
 
@@ -150,7 +162,7 @@ export class Post extends Model({
 | `path('posts/<int:id>/', view, name='detail')` | `path('posts/<int:id>/', view, { name: 'detail' })` |
 | `re_path(r'^x/$', view)` | `rePath('^x/$', view)` |
 | `include('blog.urls')` | `include(blogUrls)` (an imported module or array) |
-| `app_name = 'blog'` | `export const appName = 'blog'` |
+| `app_name = 'blog'` | `export const urlpatterns = urlpatterns('blog', [...])` (or `export const appName = 'blog'`) |
 | `reverse('blog:detail', kwargs={'id': 1})` | `reverse('blog:detail', { id: 1 })` |
 | `def view(request, id):` | `function view(c: Context)` with `kwargs(c).id` |
 | `request.GET.get('q')` | `c.req.query('q')` |
@@ -191,6 +203,9 @@ export class Post extends Model({
 | `inlines = [CommentInline]` | `inlines = [CommentInline]` |
 | `class CommentInline(admin.TabularInline): model = Comment` | `class CommentInline extends TabularInline { model = Comment }` |
 | `def has_change_permission(self, request, obj=None)` | `async hasChangePermission(c, obj?)` |
+| `@admin.action(description='Publish')` | `action({ description: 'Publish' }, async (modelAdmin, c, queryset) => {...})` |
+| `@admin.display(description='Title', boolean=True)` | `@display({ description: 'Title', boolean: true })` |
+| `self.message_user(request, 'Done')` | `await this.messageUser(c, 'Done')` |
 
 ## Django REST framework
 
@@ -208,14 +223,17 @@ export class Post extends Model({
 | `class PostViewSet(viewsets.ModelViewSet)` | `class PostViewSet extends ModelViewSet<Post>` |
 | `queryset`, `serializer_class` | `queryset`, `serializerClass` |
 | `permission_classes = [IsAuthenticated]` | `permissionClasses = [IsAuthenticated]` |
+| `IsAuthenticated \| IsAdminUser`, `&`, `~` | `IsAuthenticated.or(IsAdminUser)`, `.and(...)`, `.not()` |
 | `def get_queryset(self)` | `getQueryset()` |
 | `def perform_create(self, serializer)` | `async performCreate(serializer)` |
 | `@action(detail=True, methods=['post'])` | `@action({ detail: true, methods: ['post'] })` |
+| `def publish(self, request, pk=None)` | `async publish(request, kwargs)` |
 | `self.request.data`, `self.request.query_params` | `this.request.data`, `this.request.query` |
 | `router = DefaultRouter(); router.register(r'posts', PostViewSet)` | `const router = new DefaultRouter(); router.register('posts', PostViewSet)` |
 | `path('api/', include(router.urls))` | `path('api/', include(router.urls))` |
 | `@api_view(['GET'])` | `apiView(['GET'])(fn)` |
-| `Response(data, status=201)` | `new APIResponse(data, 201)` |
+| `Response(data, status=201)` | `new APIResponse(data, 201)` (or return plain data) |
+| `serializer = PostSerializer(posts, many=True)` | `new PostSerializer({ instance: posts, many: true })` |
 | `REST_FRAMEWORK = {'PAGE_SIZE': 20}` | `REST_FRAMEWORK: { PAGE_SIZE: 20 }` |
 | `drf-spectacular` | `SchemaView`, `SwaggerUIView`, `ScalarView` (built in) |
 | `rest_framework.authtoken` | `TokenAuthentication`, `obtainAuthToken` from `@ghuri/auth/rest` |
@@ -251,6 +269,52 @@ copied from Django keeps working.
 | `def add_arguments(self, parser): parser.add_argument('--dry-run')` | `addArguments(parser) { parser.option('--dry-run') }` |
 | `self.stdout.write(self.style.SUCCESS('ok'))` | `io.stdout(io.style.success('ok'))` |
 | `raise CommandError('...')` | `throw new CommandError('...')` |
+| cron job running a command | `onSchedule('0 3 * * *', fn)` + `triggers.crons` in `wrangler.jsonc` |
+| Celery task consumer | `onQueue('emails', fn)` + a Cloudflare Queues consumer binding |
+
+## Differences and limitations
+
+These are the places where Ghuri behaves differently from Django on purpose, or has not caught
+up yet.
+
+:::caution[D1 transactions do not roll back]
+D1 has no interactive transactions. On D1, `atomic()` runs the callback directly: there is no
+isolation and **no rollback** if it throws (`onCommit` callbacks still run after it succeeds).
+For all-or-nothing writes on D1 use `(await connections.get()).batch([...])`. On SQLite and
+Postgres, `atomic()` is a real transaction with savepoints for nested blocks. See
+[Transactions](/docs/topics/transactions/).
+:::
+
+:::note[Migrations]
+`makemigrations` (including `--empty`, `--merge`, `--check`), `migrate` (including `--fake`,
+`--fake-initial`, `--plan`), `showmigrations`, `sqlmigrate` and `--database <alias>` all work.
+**`squashmigrations` and `inspectdb` do not exist yet**, and neither do swappable-dependency
+markers or changes to a model's primary key / auto field. Data migrations use
+`ops.RunCode(async (apps, conn, { using }) => {...})` instead of `RunPython`.
+:::
+
+:::note[Admin]
+No green "+" related-object popups, no `jsi18n`, no "show facets", no `@` full-text search
+(treated as `icontains`). Templates are JSX components rather than overridable template files;
+customise through `ModelAdmin` options, hooks, CSS and custom views. See the
+[admin reference](/docs/topics/admin-reference/).
+:::
+
+:::note[MCP]
+The MCP server in `@ghuri/agents` authenticates with your REST authentication classes (for
+example `Authorization: Token <key>`). There is **no OAuth** authorization flow; clients send a
+token header. See [AI agents and MCP](/docs/topics/agents-mcp/).
+:::
+
+Other differences:
+
+- **Reverse accessors are camelCase**: `user.postSet`, not `user.post_set`. The lookup name is
+  `post`.
+- **`inBulk()` returns a `Map`** and **`delete()` returns `[total, perModel]`**.
+- **Serializers are async**: `await serializer.isValid()`, `await serializer.getData()`.
+- **Table names follow Django** (`auth_user`, `django_session`, `django_admin_log`), and
+  password hashes and signed cookies are byte-compatible, so an existing Django database can be
+  shared or migrated.
 
 ## Things that do not exist (yet)
 
@@ -258,7 +322,8 @@ copied from Django keeps working.
 - **Forms.** The admin and serializers cover validation; a standalone `@ghuri/forms` is on the
   roadmap.
 - **Multi-table inheritance and proxy models.** Use abstract models and composition.
-- **Database routers.** Multiple aliases in `DATABASES` work with `using`, but automatic routing
-  is on the roadmap.
+- **Database routers.** Multiple aliases in `DATABASES` work with `using()` and
+  `--database <alias>`, but automatic routing is on the roadmap.
+- **`squashmigrations`, `inspectdb`.**
 - **Sync ORM calls.** Every database operation is `async`, everywhere.
 - **i18n**, GIS, `contenttypes` generic relations beyond what auth needs.

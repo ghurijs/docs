@@ -30,8 +30,9 @@ REST_FRAMEWORK: {
 :::tip[If you know Django]
 Same classes and semantics as DRF: `has_permission` → `hasPermission`,
 `has_object_permission` → `hasObjectPermission`, `DjangoModelPermissions` → `ModelPermissions`,
-`DjangoObjectPermissions` → `ObjectPermissions`. Composition uses methods (`IsAdminUser.or(...)`)
-because TypeScript has no operator overloading for `|` and `&`.
+`DjangoObjectPermissions` → `ObjectPermissions`. Composition uses static methods
+(`IsAdminUser.or(...)`, `.and()`, `.not()`) because TypeScript has no operator overloading for
+`|`, `&` and `~`.
 :::
 
 ## Built-in classes
@@ -53,13 +54,29 @@ model after `migrate`:
 
 | Method | Required permission |
 |---|---|
-| `GET`, `HEAD`, `OPTIONS` | none (add `view` with `ModelPermissions.withView()`) |
+| `GET`, `HEAD`, `OPTIONS` | none (authentication only) |
 | `POST` | `blog.add_post` |
 | `PUT`, `PATCH` | `blog.change_post` |
 | `DELETE` | `blog.delete_post` |
 
 It reads the model from the view's `queryset` (or `getQueryset()`), so it only works on
-model-backed views. Assign the permissions to users or groups in the
+model-backed views. To require `view_post` for reads, override `permsMap` in a subclass:
+
+```ts
+class ModelPermissionsWithView extends ModelPermissions {
+  override permsMap = {
+    ...new ModelPermissions().permsMap,
+    GET: ['{appLabel}.view_{modelName}'],
+    HEAD: ['{appLabel}.view_{modelName}'],
+  }
+}
+```
+
+`ObjectPermissions` checks the same map with `user.hasPerm(perm, obj)` (it needs an
+object-permission backend). A user who may not even read the object gets `404` instead of `403`,
+so its existence does not leak.
+
+Assign the permissions to users or groups in the
 [admin](/docs/topics/admin/) or in code:
 
 ```ts
@@ -73,7 +90,7 @@ await editors.permissions.add(...perms)
 `hasPermission(request, view)` runs for every request. `hasObjectPermission(request, view, obj)`
 runs when the view calls `getObject()`, which every detail action of the generic views and
 viewsets does. If you write a custom action that loads an object some other way, call
-`this.checkObjectPermissions(obj)` yourself.
+`await this.checkObjectPermissions(request, obj)` yourself.
 
 List actions never check object permissions, because doing so would mean one check per row.
 Filter the queryset instead:
@@ -104,6 +121,8 @@ export class IsAuthorOrReadOnly extends BasePermission {
 ```
 
 `message` (and optionally `code`) replace the default `detail` in the 403 response.
+Unauthenticated requests get `401` when the view's first authentication class has an
+`authenticateHeader()` (for example `TokenAuthentication`), else `403`.
 
 A permission that consults the database:
 
@@ -118,7 +137,8 @@ export class IsBlogMember extends BasePermission {
 
 ## Composing permissions
 
-Every permission class has static `and`, `or` and `not` helpers that return a new class:
+Every permission class has static `and`, `or` and `not` helpers that return a new permission
+class (DRF's `&`, `|` and `~`). `and` and `or` accept several classes, and composed classes nest:
 
 ```ts
 import { IsAdminUser, IsAuthenticated, IsAuthenticatedOrReadOnly } from '@ghuri/rest'
@@ -131,7 +151,14 @@ export class PostViewSet extends ModelViewSet<Post> {
 
 // readers who are logged in but not staff
 permissionClasses = [IsAuthenticated.and(IsAdminUser.not())]
+
+// staff, or an authenticated author
+permissionClasses = [IsAdminUser.or(IsAuthenticated.and(IsAuthorOrReadOnly))]
 ```
+
+An `and` composition reports the `message` and `code` of the operand that denied the request.
+For object checks, `A.or(B)` allows when one operand passes both `hasPermission` and
+`hasObjectPermission`, as in DRF.
 
 Listing several classes in `permissionClasses` is an implicit `and`: all must pass.
 
@@ -147,7 +174,7 @@ export class PostViewSet extends ModelViewSet<Post> {
   }
 
   @action({ detail: true, methods: ['post'], permissionClasses: [IsAdminUser] })
-  async feature(c: Context) { ... }
+  async feature(request: APIRequest) { ... }
 }
 ```
 

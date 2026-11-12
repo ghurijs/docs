@@ -22,12 +22,16 @@ Superuser created successfully.
 ```
 
 Visit `http://localhost:8787/admin/` and log in. You will see the **Authentication and
-authorization** section with Users and Groups. The admin registered those itself because
+Authorization** section with Users and Groups. The admin registers those itself because
 `AuthConfig` is installed. Your blog models are not there yet.
+
+`createsuperuser` also works without prompts, which is handy in scripts and CI:
+`GHURI_SUPERUSER_PASSWORD=… npx ghuri createsuperuser --no-input --username admin --email admin@example.com`.
 
 ## Register the blog models
 
-Open `src/blog/admin.ts`, which `startapp` created, and register the models:
+Open `src/blog/admin.ts`, which `startapp` created with a commented-out example, and register
+the models:
 
 ```ts title="src/blog/admin.ts"
 import { admin } from '@ghuri/admin'
@@ -47,6 +51,11 @@ generated from the model fields: a text input for `title`, a textarea for `body`
 `published`, a select for `author` and a multi-select for `tags`. Required fields, `maxLength`
 and `unique` are validated on save, and errors show next to the field.
 
+:::note
+Unlike Django, related-object selects have no green "+" button to create a related object in
+a popup. Create the tag first (or use an inline), then pick it.
+:::
+
 The **History** link on each object lists every change made through the admin, recorded in the
 `LogEntry` model.
 
@@ -56,7 +65,7 @@ The defaults are useful, but the admin becomes much better once you tell it abou
 Replace the `Post` registration with a `ModelAdmin` class:
 
 ```ts title="src/blog/admin.ts"
-import { admin, ModelAdmin, TabularInline, type AdminAction } from '@ghuri/admin'
+import { action, admin, ModelAdmin, TabularInline } from '@ghuri/admin'
 import { Post, Tag, Comment } from './models'
 
 class CommentInline extends TabularInline<Comment> {
@@ -65,11 +74,12 @@ class CommentInline extends TabularInline<Comment> {
   fields = ['author', 'body', 'approved']
 }
 
-const makePublished: AdminAction<Post> = Object.assign(
-  async (_modelAdmin, _c, queryset) => {
-    await queryset.update({ published: true })
+const makePublished = action(
+  { description: 'Mark selected posts as published', permissions: ['change'] },
+  async (modelAdmin, c, queryset) => {
+    const n = await queryset.update({ published: true })
+    await modelAdmin.messageUser(c, `${n} posts were published.`, 'success')
   },
-  { shortDescription: 'Mark selected posts as published' },
 )
 
 @admin.register(Post)
@@ -113,8 +123,9 @@ a collapsible fieldset, and comments are edited inline at the bottom.
 `ModelAdmin` options use the same names in camelCase: `list_display` → `listDisplay`,
 `search_fields` → `searchFields`, `prepopulated_fields` → `prepopulatedFields`, and so on.
 `@admin.register(Post)` is the decorator you know (a standard TC39 decorator, so no
-`experimentalDecorators` flag). Actions receive `(modelAdmin, c, queryset)` where Django passes
-`(modeladmin, request, queryset)`.
+`experimentalDecorators` flag). `action({ description, permissions }, fn)` is
+`@admin.action(description=..., permissions=[...])`, and actions receive `(modelAdmin, c, queryset)`
+where Django passes `(modeladmin, request, queryset)`.
 :::
 
 ## Permissions
@@ -140,6 +151,7 @@ export class PostAdmin extends ModelAdmin<Post> {
 }
 ```
 
-Read [The admin](/docs/topics/admin/) for inlines, custom sites, autocomplete and file uploads.
+Read [The admin](/docs/topics/admin/) for inlines, custom sites, autocomplete and file uploads,
+and the [admin reference](/docs/topics/admin-reference/) for every `ModelAdmin` option.
 
 Next: [Part 4: A REST API](/docs/tutorial/part-4-rest-api/).

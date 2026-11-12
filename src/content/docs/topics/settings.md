@@ -11,7 +11,9 @@ with `defineSettings()`. Keys keep Django's `UPPER_SNAKE` names, so `INSTALLED_A
 import { defineSettings, SecurityMiddleware, CommonMiddleware, CsrfMiddleware, kvCache, memoryCache } from '@ghuri/core'
 import { d1, postgres } from '@ghuri/orm'
 import { r2 } from '@ghuri/storage'
-import { AuthConfig, SessionMiddleware, AuthenticationMiddleware } from '@ghuri/auth'
+import {
+  ContentTypesConfig, AuthConfig, SessionsConfig, SessionMiddleware, AuthenticationMiddleware,
+} from '@ghuri/auth'
 import { AdminConfig } from '@ghuri/admin'
 import { BlogConfig } from './blog/app'
 import { urlpatterns } from './urls'
@@ -20,8 +22,8 @@ export default defineSettings((env) => ({
   SECRET_KEY: env.SECRET_KEY,
   DEBUG: env.DEBUG === 'true',
   ALLOWED_HOSTS: ['blog.example.com', 'localhost'],
-  INSTALLED_APPS: [AuthConfig, AdminConfig, BlogConfig],
-  MIDDLEWARE: [SecurityMiddleware, CommonMiddleware, SessionMiddleware, CsrfMiddleware, AuthenticationMiddleware],
+  INSTALLED_APPS: [ContentTypesConfig, AuthConfig, SessionsConfig, AdminConfig, BlogConfig],
+  MIDDLEWARE: [SecurityMiddleware, SessionMiddleware, CommonMiddleware, CsrfMiddleware, AuthenticationMiddleware],
   ROOT_URLCONF: urlpatterns,
   DATABASES: {
     default: env.DATABASE_URL ? postgres({ url: env.DATABASE_URL }) : d1('DB'),
@@ -41,14 +43,18 @@ than an object.
 
 - **On Workers**, `env` is the Worker's environment: `vars` from `wrangler.jsonc`, secrets set
   with `wrangler secret put`, and bindings. Locally, `.dev.vars` fills in secrets.
-- **On Node**, `env` is whatever you pass to `serve()`, normally `process.env`.
+- **On Node**, `env` is whatever you pass to `serve()` from `@ghuri/core/node`, normally
+  `process.env` (the default).
 - **In the CLI**, `env` is built from `wrangler.jsonc` bindings (local, or remote with
-  `--remote`) merged with `.dev.vars` and `process.env`.
+  `--remote`) merged with `.env` / `.dev.vars` and `process.env`.
 
 The function runs once per distinct `env` object. The result is cached in a `WeakMap`, merged
 over the defaults, and validated, so calling it is cheap and you can treat settings as constants
 after startup. Because `env` values are always strings on Workers, convert explicitly:
 `DEBUG: env.DEBUG === 'true'`, `PAGE_SIZE: Number(env.PAGE_SIZE ?? 20)`.
+
+`createApp()` also accepts a plain function or a settings object and wraps it with
+`defineSettings()` for you, but exporting a `defineSettings()` factory is what the CLI expects.
 
 Adapters such as `d1('DB')`, `r2('MEDIA')` and `kvCache('CACHE')` take a **binding name**, not
 a binding. They look the binding up on `env` when the first connection is made. That keeps
@@ -58,9 +64,10 @@ a Node process.
 :::tip[If you know Django]
 `defineSettings((env) => ({...}))` is your `settings.py`, and `env` is `os.environ` plus the
 Cloudflare resources. There is no `DJANGO_SETTINGS_MODULE`: the CLI finds the file through
-`"ghuri": { "settings": "src/settings.ts" }` in `package.json`, and the Worker imports it
-directly in `src/index.ts`. For different environments, branch on `env` inside the function
-rather than keeping several settings modules.
+`"ghuri": { "settings": "src/settings.ts" }` in `package.json` (falling back to
+`src/settings.ts`, or `--settings <path>`), and the Worker imports it directly in
+`src/index.ts`. For different environments, branch on `env` inside the function rather than
+keeping several settings modules.
 :::
 
 ## Reading settings at runtime
@@ -72,12 +79,16 @@ active settings with `getSettings()`:
 import { getSettings, setting } from '@ghuri/core'
 
 const debug = getSettings().DEBUG
-const pageSize = setting('PAGE_SIZE', 20)   // with a default
+const pageSize = setting('PAGE_SIZE', 20)   // with a fallback for unset keys
 ```
 
 Both read from the current [request context](#the-request-context). Calling them at module top
 level, before any request, throws `ImproperlyConfigured`. That is deliberate: on Workers there
 is no `env` until the first request arrives.
+
+Inside middleware or an error handler that has the Hono context, `settingsFor(c)` returns the
+request's settings (or `undefined`) without throwing, even when the code runs outside the
+`AsyncLocalStorage` scope.
 
 To reach a raw binding (for example a Workers AI binding that no Ghuri adapter wraps), use
 `getEnv()`:
@@ -95,22 +106,29 @@ to Postgres.
 
 Settings, database connections, the current user and other per-request state live in a
 `GhuriContext` carried by `AsyncLocalStorage` (which is why `nodejs_compat` is required).
-`createApp()` wraps every request in `runWithContext()`. Outside requests, the CLI and test
-helpers call `app.setup(env)`, which populates apps and installs a global fallback context.
+`createApp()` wraps every request, cron trigger and queue batch in `runWithContext()`. Outside
+those, the CLI and test helpers call `app.setup(env)`, which populates apps and installs a
+global fallback context.
 
 ```ts
 interface GhuriContext {
   env: Env
   settings: GhuriSettings
-  executionCtx?: { waitUntil(p: Promise<unknown>): void }
+  executionCtx?: { waitUntil(p: Promise<unknown>): void; passThroughOnException?(): void }
   request?: Request
   hono?: import('hono').Context
   state: Map<string | symbol, unknown>   // per-request cache
 }
 ```
 
+`getContext()` returns it (and throws outside one); `tryGetContext()` returns `undefined`
+instead. The Hono context carries it too, as `c.get('ghuri')`. To run code with a context of
+your own, for example in a script, build one with `createContext({ env, settings })` and call
+`runWithContext(ctx, fn)`.
+
 You rarely need it directly, but `getContext().executionCtx?.waitUntil(promise)` is the way to
-run work after the response is sent on Workers.
+run work after the response is sent on Workers. On Node, `serve()` provides a `waitUntil` shim
+that tracks the promises and drains them on shutdown.
 
 ## Package settings and type safety
 
@@ -136,30 +154,52 @@ autocompletion and catches typos.
 ## Validation and checks
 
 When settings are first resolved, Ghuri checks the basics: `SECRET_KEY` must be set unless
-`DEBUG` is on, and `INSTALLED_APPS` and `ROOT_URLCONF` must be arrays. Packages register
-further system checks (for example, that `AUTH_USER_MODEL` names an installed model). Run them
-with:
+`DEBUG` is on, and `INSTALLED_APPS` and `ROOT_URLCONF` must be arrays. Then the
+[system check framework](https://docs.djangoproject.com/en/stable/topics/checks/) takes over:
+core checks URL patterns and `MIDDLEWARE` entries, and packages register their own (for example,
+`@ghuri/auth` checks that `AUTH_USER_MODEL` names an installed model). Run them with:
 
 ```sh
 npx ghuri check
+npx ghuri check --deploy   # adds Django's security warnings (DEBUG, SECRET_KEY, HSTS, CSRF cookie…)
 ```
 
-When `DEBUG` is on, checks also run at startup.
+When `DEBUG` is on, checks also run at startup; an error stops the app with a clear message
+(pass `createApp(settings, { checks: false })` to skip them). Silence messages by id with
+`SILENCED_SYSTEM_CHECKS: ['security.W004']`.
+
+Register your own checks with `checks.register()`, typically from an `AppConfig.ready()`:
+
+```ts
+import { checks } from '@ghuri/core'
+
+checks.register(({ settings }) =>
+  settings.BLOG_POSTS_PER_FEED === 0
+    ? [checks.error('BLOG_POSTS_PER_FEED must be positive.', { id: 'blog.E001' })]
+    : [],
+  { tags: ['blog'] },                      // { deploy: true } for deploy-only checks
+)
+```
+
+`runChecks({ deploy?, tags? })` runs them programmatically and returns `CheckMessage`s.
 
 ## Core settings
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `SECRET_KEY` | required | Signs sessions, CSRF tokens, password reset tokens. |
+| `SECRET_KEY` | required | Signs sessions, CSRF tokens, password reset tokens. Optional only with `DEBUG`. |
 | `DEBUG` | `false` | Detailed error pages with stack traces; runs checks at startup. Never in production. |
-| `ALLOWED_HOSTS` | `['*']` | Host header values the site will serve. Enforced by `CommonMiddleware`. |
+| `ALLOWED_HOSTS` | `['*']` | Host header values the site will serve. Enforced by the app itself on every request (400 `DisallowedHost`). An empty list with `DEBUG` allows `localhost` only. |
 | `INSTALLED_APPS` | required | `AppConfig` classes or instances, in order. |
-| `MIDDLEWARE` | `[]` | Middleware classes or Hono middleware handlers, outermost first. |
+| `MIDDLEWARE` | `[]` | Middleware classes, configured instances, or Hono middleware handlers, outermost first. |
 | `ROOT_URLCONF` | required | The root URL pattern array. |
 | `APPEND_SLASH` | `true` | Redirect `GET /x` to `/x/` when only the latter matches. |
-| `TIME_ZONE` / `USE_TZ` | `'UTC'` / `true` | Time zone for date lookups and display. |
+| `TIME_ZONE` / `USE_TZ` | `'UTC'` / `true` | Time zone for display (the admin uses `TIME_ZONE`). |
 | `CACHES` | memory cache | Cache aliases. See [Caching](/docs/topics/caching/). |
 | `CSRF_TRUSTED_ORIGINS` | `[]` | Extra origins allowed for unsafe requests. |
-| `CORS` | `false` | `{ allowOrigins, allowCredentials }` for `CorsMiddleware`. |
+| `CORS` | `false` | `{ allowOrigins, allowCredentials, … }` for `CorsMiddleware`. |
+| `API_PATH_PREFIXES` | `['/api']` | Errors under these paths are always rendered as JSON. |
 
-Every setting from every package is listed in the [settings reference](/docs/reference/settings/).
+Security, CSRF and host settings (`SECURE_*`, `CSRF_COOKIE_*`, `X_FRAME_OPTIONS`,
+`USE_X_FORWARDED_HOST`, `PREPEND_WWW`, …) and every setting from every other package are listed
+in the [settings reference](/docs/reference/settings/).

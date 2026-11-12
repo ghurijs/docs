@@ -12,7 +12,8 @@ lists the built-in ones; this page is about writing yours.
 The `ghuri` CLI runs on your machine (or in CI, or in a container), not inside a deployed
 Worker. For each invocation it:
 
-1. finds your settings through `package.json#ghuri.settings`,
+1. finds your settings through `package.json#ghuri.settings` (or `src/settings.ts`, or
+   `--settings <path>`),
 2. builds an `env` from `wrangler.jsonc` bindings (local simulation by default, real
    Cloudflare resources with `--remote`), merged with `.dev.vars` and `process.env`,
 3. calls `app.setup(env)`, which resolves settings and populates `INSTALLED_APPS`,
@@ -68,7 +69,8 @@ export class PublishScheduledCommand extends BaseCommand {
 - **Arguments** are positional. `variadic: true` collects the rest into an array, and
   `required: true` makes the CLI fail without one.
 - **Options** use commander-style flags: `'--dry-run'` is a boolean, `'-l, --limit <n>'` takes a
-  value. Names are camelCased in `args`, so `--dry-run` becomes `args.dryRun`.
+  value and `'--port [port]'` an optional one. Names are camelCased from the long flag, so
+  `--dry-run` becomes `args.dryRun`; a `'--no-input'` style flag sets `args.input` to `false`.
 - **`handle`** may return a number, used as the process exit code. Returning nothing means `0`.
 - **`CommandError(message, returncode = 1)`** prints the message in the error style without a
   stack trace and exits with `returncode`. Any other exception prints a full stack trace.
@@ -117,8 +119,13 @@ npx ghuri publish_scheduled --dry-run
 npx ghuri help publish_scheduled
 ```
 
-If two apps register the same name, the app listed earlier in `INSTALLED_APPS` wins, so a project
-app can override a command from a package by being listed first.
+If two apps register the same name, the app listed **later** in `INSTALLED_APPS` wins, and an
+app command also replaces a built-in command of the same name (except `help`). To override a
+command from a package, list your app after it.
+
+:::note
+This is the opposite of Django, where the first app in `INSTALLED_APPS` wins.
+:::
 
 :::tip[If you know Django]
 This is `BaseCommand` with `help`, `add_arguments(parser)` and `handle(*args, **options)`, in
@@ -151,5 +158,20 @@ registered.
 ## Running commands on a schedule
 
 Commands are for people and CI. For work that runs on a schedule in production, put the logic in
-a function that both a command and a Workers cron handler call. See
-[Deploy to Cloudflare](/docs/deployment/cloudflare/) for cron triggers.
+a function that both a command and an `onSchedule()` cron handler call:
+
+```ts title="src/blog/app.ts"
+import { AppConfig, onSchedule } from '@ghuri/core'
+import { PublishScheduledCommand, publishScheduled } from './commands/publish-scheduled'
+
+export class BlogConfig extends AppConfig {
+  name = 'blog'
+  commands = { publish_scheduled: PublishScheduledCommand }
+
+  ready() {
+    onSchedule('*/15 * * * *', () => publishScheduled({ limit: 100 }))
+  }
+}
+```
+
+See [Background tasks](/docs/topics/background-tasks/) for cron triggers and queues.

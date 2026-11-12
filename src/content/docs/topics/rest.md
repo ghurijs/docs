@@ -96,21 +96,31 @@ curl -X POST http://localhost:8787/api/posts/ \
   -d '{"title": "Hello", "slug": "hello", "body": "First post"}'
 ```
 
+The `Token` header works once `TokenAuthentication` is listed in
+`DEFAULT_AUTHENTICATION_CLASSES` ([below](#the-rest_framework-setting)); the default,
+`MiddlewareAuthentication`, only sees session users.
+
 ## How a request flows
 
 When a request reaches an API view, `@ghuri/rest` runs these steps in order, the same way DRF
 does:
 
-1. **Parse.** The body is parsed according to `Content-Type` (JSON, form or multipart) and
-   exposed lazily as `this.request.data`. Query parameters are on `this.request.query`.
-2. **Authenticate.** Each class in `authenticationClasses` is tried in turn. The first one that
+1. **Parse.** The body is parsed according to `Content-Type` (JSON, form or multipart) before
+   your handler runs, so `this.request.data` is a plain synchronous property. A parse error
+   (`ParseError` 400, `UnsupportedMediaType` 415) is raised when you first read it, as in DRF.
+   Query parameters are on `this.request.query` (first value per key) and
+   `this.request.queryParams` (a `URLSearchParams`).
+2. **Negotiate content.** The renderer is chosen from `Accept` (JSON, or the browsable API for
+   browsers).
+3. **Authenticate.** Each class in `authenticationClasses` is tried in turn. The first one that
    returns a user sets `this.request.user`; if none does, the user is anonymous.
-3. **Check permissions.** Every class in `permissionClasses` must allow the request.
+4. **Check permissions.** Every class in `permissionClasses` must allow the request.
    Object-level checks run later, when `getObject()` loads the instance.
-4. **Throttle.** Each class in `throttleClasses` may reject the request with `429`.
-5. **Dispatch** to the handler (`get`, `post`, …, or a viewset action such as `list`).
-6. **Handle exceptions.** `APIException` subclasses, Ghuri's `Http404`/`PermissionDenied` and
-   validation errors are turned into JSON responses with DRF's error shapes.
+5. **Throttle.** Each class in `throttleClasses` may reject the request with `429`.
+6. **Dispatch** to the handler (`get`, `post`, …, or a viewset action such as `list`).
+7. **Handle exceptions.** `APIException` subclasses, Ghuri's `Http404`/`PermissionDenied`/
+   `ValidationError` and the ORM's `DoesNotExist` are turned into JSON responses with DRF's error
+   shapes. Replace the handler with `REST_FRAMEWORK.EXCEPTION_HANDLER`.
 
 ## Error responses
 
@@ -126,7 +136,8 @@ Errors use the shapes DRF clients already expect:
 
 Raise them yourself with the exception classes from `@ghuri/rest`: `APIException`,
 `ValidationError`, `ParseError`, `NotAuthenticated`, `AuthenticationFailed`,
-`PermissionDenied`, `NotFound`, `MethodNotAllowed` and `Throttled`.
+`PermissionDenied`, `NotFound`, `MethodNotAllowed`, `NotAcceptable`, `UnsupportedMediaType` and
+`Throttled`.
 
 ```ts
 import { APIException } from '@ghuri/rest'
@@ -167,20 +178,68 @@ export default defineSettings((env) => ({
 
 | Key | Default | Purpose |
 |---|---|---|
-| `DEFAULT_AUTHENTICATION_CLASSES` | `[SessionAuthentication, BasicAuthentication]` when `@ghuri/auth` is installed, else `[]` | How `request.user` is determined |
+| `DEFAULT_AUTHENTICATION_CLASSES` | `[MiddlewareAuthentication]` | How `request.user` is determined |
 | `DEFAULT_PERMISSION_CLASSES` | `[AllowAny]` | Who may call a view |
+| `DEFAULT_RENDERER_CLASSES` | `[JSONRenderer, BrowsableAPIRenderer]` | Response formats |
+| `DEFAULT_PARSER_CLASSES` | `[JSONParser, FormParser, MultiPartParser]` | Accepted request bodies |
+| `DEFAULT_CONTENT_NEGOTIATION_CLASS` | `DefaultContentNegotiation` | Picks the renderer |
+| `DEFAULT_METADATA_CLASS` | `SimpleMetadata` | Body of `OPTIONS` responses |
 | `DEFAULT_PAGINATION_CLASS` | `null` (no pagination) | How list responses are paged |
 | `PAGE_SIZE` | `null` | Page size for the default paginator |
 | `DEFAULT_FILTER_BACKENDS` | `[]` | Backends applied in `filterQueryset()` |
 | `DEFAULT_THROTTLE_CLASSES` | `[]` | Rate limits applied to every view |
-| `DEFAULT_THROTTLE_RATES` | `{}` | Rates per scope, e.g. `{ anon: '100/day' }` |
+| `DEFAULT_THROTTLE_RATES` | `{ user: null, anon: null }` | Rates per scope, e.g. `{ anon: '100/day' }` |
+| `THROTTLE_CACHE` | `'default'` | Cache alias that stores throttle history |
+| `NUM_PROXIES` | `null` | Trusted proxies in front of the app, for client IPs |
+| `DEFAULT_SCHEMA_CLASS` | `AutoSchema` | OpenAPI schema per view |
 | `SEARCH_PARAM` | `'search'` | Query parameter for `SearchFilter` |
 | `ORDERING_PARAM` | `'ordering'` | Query parameter for `OrderingFilter` |
-| `NON_FIELD_ERRORS_KEY` | `'non_field_errors'` | Key for errors raised from `validate()` |
-| `UNAUTHENTICATED_USER` | `AnonymousUser` | User used when nobody authenticated |
+| `EXCEPTION_HANDLER` | `exceptionHandler` | Turns exceptions into responses |
+| `NON_FIELD_ERRORS_KEY` | `'nonFieldErrors'` | Key for errors raised from `validate()` |
+| `UNAUTHENTICATED_USER` | `() => new AnonymousUser()` | User used when nobody authenticated |
+| `UNAUTHENTICATED_TOKEN` | `null` | `request.auth` when nobody authenticated |
+| `URL_FORMAT_OVERRIDE` / `FORMAT_SUFFIX_KWARG` | `'format'` / `'format'` | `?format=json` and `.json` suffixes |
+| `URL_FIELD_NAME` | `'url'` | Name of `HyperlinkedModelSerializer`'s URL field |
+| `DATETIME_FORMAT` / `DATE_FORMAT` / `TIME_FORMAT` | `'iso-8601'` | Output formats |
+| `COERCE_DECIMAL_TO_STRING` | `true` | Render decimals as strings |
+| `UPLOADED_FILES_USE_URL` | `true` | Render file fields as URLs |
+| `TEST_REQUEST_DEFAULT_FORMAT` | `'multipart'` | Body format of `APIClient` requests |
 
 Class references are classes, not dotted strings. That is how the bundler sees them and why your
-editor can jump to them.
+editor can jump to them. Settings are read at request time through `apiSettings` (DRF's
+`api_settings`), so `apiSettings.PAGE_SIZE` works anywhere.
+
+`MiddlewareAuthentication` uses the user that `AuthenticationMiddleware` already put on the
+request and enforces CSRF on unsafe methods. For tokens or JWTs, list the classes from
+[`@ghuri/auth/rest`](/docs/topics/rest/authentication/).
+
+`status` holds DRF's constants and helpers: `status.HTTP_201_CREATED`, `status.isSuccess(code)`.
+
+:::note[Not yet ported]
+There are no API versioning classes and no `TemplateHTMLRenderer` yet.
+:::
+
+## Testing an API
+
+`APIClient` from `@ghuri/rest/testing` is DRF's test client: it encodes bodies, can skip
+authentication, and parses JSON responses into `res.data`.
+
+```ts
+import { APIClient } from '@ghuri/rest/testing'
+
+const client = new APIClient(app, { env, defaultFormat: 'json' })
+client.forceAuthenticate(user)                       // bypass the authentication classes
+client.credentials({ Authorization: 'Token abc' })   // headers for every request
+const res = await client.post('/api/posts/', { title: 'Hi', slug: 'hi' })
+expect(res.status).toBe(201)
+expect(res.data.title).toBe('Hi')
+await client.get('/api/posts/', { search: 'hi' })    // second argument: query parameters
+```
+
+Use the same `env` object for `app.setup(env)`, `setupTestDatabase()` and the client so requests
+see the test database. Formats are `'json'`, `'multipart'` (the default,
+`TEST_REQUEST_DEFAULT_FORMAT`) and `'form'`. See [Testing](/docs/topics/testing/) for the rest of
+the test setup.
 
 ## Where to go next
 

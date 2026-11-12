@@ -35,7 +35,9 @@ REST_FRAMEWORK: {
 ```
 
 Rates are `<number>/<period>` where the period is `second`, `minute`, `hour` or `day` (only the
-first letter matters, so `'10/s'` works too).
+first letter matters, so `'10/s'` works too). A multiplier is allowed: `'10/5m'` is ten requests
+per five minutes. A scope used by a throttle must have an entry in `DEFAULT_THROTTLE_RATES`
+(`null` disables it), or the request fails with `ImproperlyConfigured`.
 
 Per view:
 
@@ -64,7 +66,9 @@ export class UploadView extends APIView {
 }
 ```
 
-Every view with the same `throttleScope` shares one counter per client.
+Every view with the same `throttleScope` shares one counter per client. Views without a
+`throttleScope` are not throttled by `ScopedRateThrottle`. A viewset can set a scope for one
+action only: `@action({ detail: true, methods: ['post'], throttleScope: 'uploads' })`.
 
 ## Client IP addresses
 
@@ -78,8 +82,10 @@ REST_FRAMEWORK: {
 }
 ```
 
-Without `NUM_PROXIES` on Node, the socket address is used, which behind a proxy is the proxy's
-address, and all your users share one bucket.
+Without `NUM_PROXIES`, the whole `X-Forwarded-For` value is used as the identity when the header
+is present (as in DRF), which a client can vary at will; when it is absent, `CF-Connecting-IP` or
+the socket address is used. Behind a proxy, set `NUM_PROXIES` so all users do not share the
+proxy's bucket and clients cannot pick their own.
 
 ## Accuracy on Workers
 
@@ -103,14 +109,19 @@ export class ApiKeyRateThrottle extends SimpleRateThrottle {
   scope = 'apikey'
 
   getCacheKey(request: APIRequest) {
-    const key = request.raw.headers.get('X-Api-Key')
+    const key = request.header('X-Api-Key')
     return key ? `throttle_${this.scope}_${key}` : null
   }
 }
 ```
 
-Or implement `BaseThrottle` directly with `allowRequest(request, view)` and `wait()` for a
-completely different algorithm.
+Or set `rate = '5/minute'` on the subclass instead of a `scope`. For a completely different
+algorithm, extend `BaseThrottle` and implement `allowRequest(request, view)` (may be async) and
+`wait()`.
 
-Throttle counters use the `default` cache alias. Set `cache = caches.get('throttle')` on a
-throttle class to keep them separate from application data.
+Throttle counters use the cache alias in `THROTTLE_CACHE` (default `'default'`). Point it at a
+separate alias to keep them apart from application data:
+
+```ts
+REST_FRAMEWORK: { THROTTLE_CACHE: 'throttle' }   // an alias defined in CACHES
+```

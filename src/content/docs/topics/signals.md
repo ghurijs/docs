@@ -12,15 +12,19 @@ after another**, before `send()` resolves.
 
 | Signal | From | Sent | Arguments |
 |---|---|---|---|
-| `preSave` | `@ghuri/orm` | before `instance.save()` writes | `instance`, `raw`, `updateFields` |
-| `postSave` | `@ghuri/orm` | after `instance.save()` writes | `instance`, `created`, `raw`, `updateFields` |
-| `preDelete` | `@ghuri/orm` | before an instance is deleted (also for each object of a cascading delete) | `instance`, `origin` |
-| `postDelete` | `@ghuri/orm` | after an instance is deleted | `instance`, `origin` |
-| `m2mChanged` | `@ghuri/orm` | around `add`/`remove`/`set`/`clear` on a many-to-many | `instance`, `action`, `reverse`, `model`, `pkSet` |
+| `preSave` | `@ghuri/orm` | before `instance.save()` writes | `instance`, `raw`, `using`, `updateFields` |
+| `postSave` | `@ghuri/orm` | after `instance.save()` writes | `instance`, `created`, `raw`, `using`, `updateFields` |
+| `preDelete` | `@ghuri/orm` | before an instance is deleted (also for each object of a cascading delete) | `instance`, `using`, `origin` |
+| `postDelete` | `@ghuri/orm` | after an instance is deleted | `instance`, `using`, `origin` |
+| `m2mChanged` | `@ghuri/orm` | around `add`/`remove`/`set`/`clear` on a many-to-many (sender: the through model) | `instance`, `action`, `reverse`, `model`, `pkSet`, `using` |
+| `preMigrate` / `postMigrate` | `@ghuri/orm` | for every installed app before / after `migrate` (`postMigrate` also after `flush` and `setupTestDatabase`; sender: the `AppConfig`) | `appConfig`, `using`, `plan` |
+| `userLoggedIn` / `userLoggedOut` | `@ghuri/auth` | by `login()` / `logout()` (sender: the user model) | `c`, `user` |
+| `userLoginFailed` | `@ghuri/auth` | when `authenticate()` finds no matching backend | `c`, `credentials` (secrets masked) |
 | `requestStarted` | `@ghuri/core` | when a request enters the app | `request` |
 | `requestFinished` | `@ghuri/core` | after the response is produced | `request`, `response` |
 
-Every receiver also receives `sender`: the model class for ORM signals.
+Every receiver also receives `sender`: the model class for ORM model signals, the app object
+for request signals.
 
 `raw` is `true` while `loaddata` is loading fixtures. Receivers that create related rows should
 skip that case, because the fixture contains those rows already.
@@ -85,15 +89,18 @@ export class BlogConfig extends AppConfig {
 }
 ```
 
-A static `import './signals'` at the top of `app.ts` works too. `ready()` makes it clear the
-receivers need the app registry to be populated.
+A static import assigned to the config's `modules` (`import * as signals from './signals'`,
+then `modules = { signals }`) works too, and keeps the bundler aware of the module. `ready()`
+makes it clear the receivers need the app registry to be populated.
 
 :::tip[If you know Django]
 This is the `ready()` + `signals.py` convention from Django's docs. `@receiver(post_save,
 sender=Post)` becomes `receiver(postSave, { sender: Post })(fn)`, and `dispatch_uid` is `uid`.
 The difference: Django calls receivers synchronously and ignores what they return. Ghuri awaits
 each receiver in turn, so a `postSave` receiver can safely hit the database before `save()`
-resolves. An exception in a receiver propagates to the caller (there is no `send_robust`).
+resolves. An exception in a receiver propagates to the caller and stops the remaining receivers
+(there is no `send_robust`). The exception is `requestFinished`: a failing receiver there is
+logged and does not affect the response.
 :::
 
 ## Receivers and the request lifecycle on Workers
@@ -116,8 +123,8 @@ postSave.connect(({ instance }) => {
 ```
 
 Database work inside `waitUntil` still runs inside the request's context, so the ORM connection
-is available. For anything long or retryable, send a message to a Cloudflare Queue instead;
-`@ghuri/tasks` is planned to wrap this.
+is available. For anything long or retryable, send a message to a Cloudflare Queue instead and
+consume it with an `onQueue()` handler; see [Background tasks](/docs/topics/background-tasks/).
 
 ## Defining your own signals
 

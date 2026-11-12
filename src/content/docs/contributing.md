@@ -27,7 +27,9 @@ Each package lives in its own repository and publishes to npm under the `@ghuri`
 
 ## The architecture spec
 
-`ARCHITECTURE.md` in the meta repo is the source of truth for every package's public API. Packages
+`ARCHITECTURE.md` in the meta repo is the source of truth for every package's public API. Its
+last section, "As-built notes", records where the implementation deliberately differs from the
+earlier sections and wins over them. Packages
 talk to each other only through the contracts written there: for example, the REST framework
 reads `Model._meta` and `Field.jsonSchema()`, and the admin reads `Field.formHint()`, without
 importing ORM internals.
@@ -47,7 +49,8 @@ npm run bootstrap
 
 `npm run bootstrap` runs `scripts/bootstrap.sh`, which:
 
-1. clones each package repository into `packages/<repo>` (git-ignored by the meta repo),
+1. clones each package repository (`core`, `orm`, `auth`, `rest`, `storage`, `admin`, `agents`,
+   `cli`, `create-ghuri`) into `packages/<repo>` (git-ignored by the meta repo),
 2. clones `examples` into `examples/`,
 3. runs `npm install` at the root, linking the packages to each other, and
 4. builds every package.
@@ -93,8 +96,12 @@ Every page has an **Edit page** link at the bottom that opens the source file on
 - **Public API** is what `src/index.ts` and declared subpaths export. Everything else is internal
   and may change without notice.
 - **Tests** use Vitest on Node. Database tests run against SQLite (better-sqlite3), PGlite
-  (Postgres dialect) and D1 (Miniflare) where relevant.
-- **Lint and format** with Biome, configured at the workspace root.
+  (Postgres dialect) and D1 (Miniflare) where relevant; `testBackends()` from
+  `@ghuri/orm/testing` reads `GHURI_TEST_BACKENDS=sqlite,pglite` to narrow the set.
+- **Decorators** are standard TC39 decorators. Vite 8 (oxc) does not lower them yet, so packages
+  that use them in tests lower them in `vitest.config.ts` (an esbuild pre-transform, or oxc's
+  legacy decorator mode).
+- **Lint and format** with Biome (each package has its own `biome.json`).
 
 ## Commits and pull requests
 

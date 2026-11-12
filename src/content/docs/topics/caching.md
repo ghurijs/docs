@@ -4,8 +4,9 @@ description: Configure cache backends (memory, Workers KV, the Cache API) and ca
 ---
 
 Ghuri's cache framework is a small key-value API with pluggable backends, like Django's. On
-Cloudflare the default backend is Workers KV. On Node it is an in-process memory cache. Your
-code calls `cache.get()` and `cache.set()` either way.
+Cloudflare you will usually point the default cache at Workers KV; on Node, or when nothing is
+configured, it is an in-process memory cache. Your code calls `cache.get()` and `cache.set()`
+either way.
 
 ## Configuring caches
 
@@ -17,7 +18,8 @@ import { defineSettings, kvCache, cfCache, memoryCache } from '@ghuri/core'
 export default defineSettings((env) => ({
   // ...
   CACHES: {
-    default: env.CACHE ? kvCache('CACHE') : memoryCache(),
+    default: env.CACHE ? kvCache('CACHE', { keyPrefix: 'v1' }) : memoryCache(),
+    local: memoryCache({ timeout: 60, maxEntries: 1000 }),
     pages: cfCache(),
   },
 }))
@@ -25,15 +27,21 @@ export default defineSettings((env) => ({
 
 | Backend | Storage | Scope | Good for |
 |---|---|---|---|
-| `memoryCache()` | a `Map` in the current process or isolate | one isolate / one Node process | tests, Node apps with one process, very hot small values |
+| `memoryCache({ maxEntries? })` | a `Map` in the current process or isolate (default 10,000 entries, oldest evicted first) | one isolate / one Node process | tests, Node apps with one process, very hot small values |
 | `kvCache(binding)` | Workers KV namespace | global, eventually consistent | values read far more than written: settings, rendered fragments, API results |
-| `cfCache()` | the Workers Cache API | one Cloudflare data centre | whole responses, large values, anything that can be recomputed |
+| `cfCache({ name? })` | the Workers [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) (`caches.default`, or a named cache) | one Cloudflare data centre, best effort | whole responses, large values, anything that can be recomputed |
 
-When `CACHES` is not set, `default` is `memoryCache()`.
+Every backend also takes `keyPrefix` (Django's `KEY_PREFIX`, prepended as `prefix:key`) and
+`timeout`, the default TTL in seconds (Django's `TIMEOUT`, default `300`; `null` means never
+expire).
+
+When `CACHES` is not set, `default` is a `memoryCache()`. Asking for any other alias that is not
+configured throws `ImproperlyConfigured`.
 
 A backend config has the shape `{ backend: string; create(env): CacheBackend }`, the same
-pattern as database and storage configs, so you can write your own. A Redis backend is on the
-roadmap.
+pattern as database and storage configs, so you can write your own. `CacheBackend` stores
+strings: `get(key)`, `set(key, value, ttlSeconds | null)`, `delete(key)`, and optionally
+`has(key)` and `clear(prefix)`.
 
 :::tip[If you know Django]
 `cache` is `django.core.cache.cache` and `caches.get('pages')` is `caches['pages']`. The method
@@ -48,21 +56,38 @@ import { cache, caches } from '@ghuri/core'
 
 await cache.set('greeting', { text: 'hello' }, 300)   // TTL in seconds
 await cache.get<{ text: string }>('greeting')         // { text: 'hello' } or undefined
+await cache.get('missing', 'fallback')                // 'fallback'
 await cache.has('greeting')                           // true
 await cache.delete('greeting')
 
 // Compute on a miss, store, and return:
 const count = await cache.getOrSet('posts:count', () => Post.objects.filter({ published: true }).count(), 60)
 
+await cache.add('lock:import', true, 30)              // only if missing; true when stored
+await cache.set('hits', 0, null)                      // null: never expires
+await cache.incr('hits')                              // 1 (decr() too); throws if the key is missing
+await cache.setMany({ a: 1, b: 2 }, 60)
+await cache.getMany(['a', 'b'])                       // { a: 1, b: 2 }
+await cache.deleteMany(['a', 'b'])
+
 const pages = caches.get('pages')
 await pages.set('home', html, 600)
-await pages.clear?.()   // only some backends support clearing
+await caches.get('local').clear()                     // every key of this cache (respects keyPrefix)
 ```
 
-Values must be JSON-serialisable. Model instances are not: cache the data you need
+Values are stored as JSON, so they must be JSON-serialisable. Model instances serialise to plain
+objects and come back as plain objects, not instances; cache the data you need
 (`await qs.values('id', 'title')`, or a serializer's output) rather than instances.
 
-Omit the TTL to keep a value until it is evicted. `set` with a TTL of `0` deletes the key.
+Omitting the TTL uses the backend's `timeout` (300 seconds unless configured). Pass `null` to
+keep a value until it is evicted; a TTL of `0` or less deletes the key.
+
+:::caution
+`add()` and `incr()` are a read followed by a write, not atomic operations: two concurrent
+requests can both "win". On KV, with eventual consistency across locations, the window is
+seconds wide. Do not use them for locks or exact counters. `incr()` also stores the new value
+without an expiry.
+:::
 
 ## Caching a view's result
 
@@ -96,13 +121,13 @@ import { Post } from './models'
 postSave.connect(async () => { await cache.delete('blog:popular:v1') }, { sender: Post, uid: 'blog-popular-cache' })
 ```
 
-Putting a version (`:v1`) in the key lets you invalidate everything at once after a deploy that
-changes the cached shape.
+Putting a version (`:v1`) in the key, or in `keyPrefix`, lets you invalidate everything at once
+after a deploy that changes the cached shape.
 
 ## Caching whole responses
 
-For anonymous pages that are identical for everyone, `cfCache()` can hold the `Response`
-itself. Return a cached copy when there is one, and store a fresh one in the background with
+For anonymous pages that are identical for everyone, `cfCache()` can hold the rendered HTML.
+Return a cached copy when there is one, and store a fresh one in the background with
 `waitUntil` so the user does not wait for the write:
 
 ```ts
@@ -132,7 +157,12 @@ the response before it reaches your Worker at all.
 - **Writes are limited.** Writing the same key more than about once per second is
   rate-limited, and KV's free plan has a daily write quota. Cache data that is read often and
   written rarely.
-- **`clear()` is not supported** on KV. Namespaced or versioned keys work better.
+- **`clear()` lists and deletes keys** under the cache's prefix, one request per key. That is
+  fine for small caches but slow and write-heavy for large ones; namespaced or versioned keys
+  work better.
+
+`cfCache()` is per data centre and may evict entries at any time, and its `clear()` throws
+(the Cache API cannot list keys).
 
 ## Who else uses the cache
 
@@ -140,4 +170,6 @@ the response before it reaches your Worker at all.
   (or the alias in `REST_FRAMEWORK.THROTTLE_CACHE`). Because KV is eventually consistent,
   throttles on KV are approximate across locations. For strict limits, use a Durable Object or
   Cloudflare's rate limiting rules.
-- The `kv` [session engine](/docs/topics/authentication/) uses its own KV binding, not `CACHES`.
+- Sessions can live in a cache with `SESSION_ENGINE: 'cache'` (alias `SESSION_CACHE_ALIAS`,
+  default `'default'`). The `kv` [session engine](/docs/topics/authentication/) uses its own KV
+  binding (`SESSION_KV_BINDING`, default `'SESSIONS'`), not `CACHES`.

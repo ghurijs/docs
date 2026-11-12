@@ -13,8 +13,13 @@ There are two ways to filter what a list endpoint returns, and most APIs use bot
 :::tip[If you know Django]
 `SearchFilter` and `OrderingFilter` are DRF's. `FieldFilter` covers the common part of
 `django-filter`'s `DjangoFilterBackend`: `filtersetFields` is `filterset_fields`, and lookups use
-the same `__` syntax as the ORM (`?createdAt__gte=2026-01-01`). There is no `FilterSet` class
-yet; for complex filters, override `getQueryset()`.
+the same `__` syntax as the ORM (`?createdAt__gte=2026-01-01`). It is also exported as
+`DjangoFilterBackend`, so ported code keeps working.
+:::
+
+:::note
+There is no `FilterSet` class yet. For complex filters, override `getQueryset()` or write a
+filter backend.
 :::
 
 ## Filtering in `getQueryset()`
@@ -86,9 +91,10 @@ GET /api/posts/?tags__name__in=cloudflare,postgres
 ```
 
 Values are converted with the model field's `toPython()`, so `?published=false` becomes the
-boolean `false` and `?createdAt__gte=2026-01-01` becomes a `Date`. An invalid value returns `400`
-with the field error. Parameters for fields and lookups you did not allow are ignored, never
-passed through to the ORM.
+boolean `false` and `?createdAt__gte=2026-01-01` becomes a `Date` (a bare date on a
+`DateTimeField` means midnight UTC). `in` takes comma-separated values and `range` exactly two.
+An invalid value returns `400` with the field error. Parameters for fields and lookups you did
+not allow are ignored, never passed through to the ORM.
 
 When filtering across a many-to-many relation (`tags__name`), the backend adds `.distinct()` so
 a post with two matching tags is returned once.
@@ -109,11 +115,15 @@ Prefix a field name to change the lookup:
 | (none) | `icontains` |
 | `^` | `istartswith` |
 | `=` | `iexact` |
-| `$` | `regex` (Postgres only) |
+| `@` | full-text in DRF; mapped to `icontains` here |
+| `$` | `iregex` (Postgres and Node SQLite; D1 has no regex support) |
 
 ```ts
 searchFields = ['^title', 'body', '=author__username']
 ```
+
+Terms are split on whitespace and commas; `"quoted phrases"` stay together. Searching across a
+to-many relation adds `.distinct()`. The parameter name comes from `SEARCH_PARAM`.
 
 `icontains` compiles to `LIKE` on SQLite/D1 and `ILIKE` on Postgres. Neither uses a normal index,
 so on large tables consider a dedicated search column or Postgres full-text search through a
@@ -127,13 +137,15 @@ GET /api/posts/?ordering=title,-createdAt
 ```
 
 Only fields in `orderingFields` are accepted (`'__all__'` allows any model field, which you rarely
-want on a public API). Unknown fields are ignored. `ordering` on the view, or the model's
-`Meta.ordering`, is the default.
+want on a public API). Without `orderingFields`, the serializer's readable model-backed fields are
+allowed, as in DRF. Unknown fields are ignored. `ordering` on the view is the default; without it
+the queryset keeps the model's `Meta.ordering`. The parameter name comes from `ORDERING_PARAM`.
 
 ## Writing a filter backend
 
-Implement `filterQueryset(request, qs, view)`. Optionally implement `getSchemaParameters(view)`
-so the parameters show up in the [OpenAPI schema](/docs/topics/rest/openapi/).
+Implement `filterQueryset(request, qs, view)`. Optionally implement
+`getSchemaOperationParameters(view)` so the parameters show up in the
+[OpenAPI schema](/docs/topics/rest/openapi/).
 
 ```ts title="src/blog/filters.ts"
 import { BaseFilterBackend, type APIRequest } from '@ghuri/rest'
@@ -147,7 +159,7 @@ export class RecentFilter extends BaseFilterBackend {
     return qs.filter({ createdAt__gte: since })
   }
 
-  getSchemaParameters() {
+  getSchemaOperationParameters() {
     return [{ name: 'recent', in: 'query', schema: { type: 'integer' }, description: 'Only items from the last N days' }]
   }
 }

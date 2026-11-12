@@ -41,16 +41,20 @@ EXPOSE 8000
 CMD ["node", "dist/server.js"]
 ```
 
-Two details matter:
+Three details matter:
 
 - **`src/` is copied into the runtime image.** The server runs the compiled `dist/server.js`,
   but `ghuri migrate` and other management commands load your settings and migrations from
   TypeScript with jiti. Without `src/` you cannot run them inside the container.
-- **`@ghuri/cli` must be a production dependency** (in `dependencies`, not
-  `devDependencies`) for the same reason. If you would rather keep the image minimal, run
-  migrations from CI or a separate "release" image built from the `build` stage.
+- **`@ghuri/cli` must be a production dependency** for the same reason. The generated
+  `package.json` lists it under `devDependencies`, so move it (`npm install @ghuri/cli@next`
+  moves it to `dependencies`). `jiti` is already a dependency. If you would rather keep the image
+  minimal, run migrations from CI or a separate "release" image built from the `build` stage.
 - **`wrangler.jsonc` is not copied.** Without it the CLI builds `env` from `process.env`
   alone, which is what you want in a container.
+
+If you skip the build step, drop the `build` stage and the `dist` copy and start the server
+the way `npm start` does: `CMD ["node", "--import", "jiti/register", "src/server.ts"]`.
 
 Add a `.dockerignore` so local state does not end up in the image:
 
@@ -59,7 +63,10 @@ node_modules
 dist
 .wrangler
 .dev.vars
+.env
 .git
+media
+*.sqlite3
 ```
 
 ## docker compose for local production-like runs

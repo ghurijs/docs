@@ -83,29 +83,29 @@ const recent = await Post.objects
 
 <Steps>
 
-1. Create a project. The default template targets Cloudflare Workers with D1.
+1. Create a project. The default template targets Cloudflare Workers with D1 and R2.
 
    ```sh
    npm create ghuri@latest mysite
    cd mysite
    ```
 
-2. Add an app and create the database tables.
+2. Create the database tables and an admin user. This runs against a local D1 database that
+   Wrangler simulates on your machine.
 
    ```sh
-   npx ghuri startapp blog
-   npx ghuri makemigrations
    npx ghuri migrate
+   npx ghuri createsuperuser
    ```
 
-3. Create an admin user and start the development server.
+3. Start the development server.
 
    ```sh
-   npx ghuri createsuperuser
    npm run dev
    ```
 
-   Open `http://localhost:8787/admin/` and sign in.
+   Open `http://localhost:8787/admin/` and sign in. Add your first app with
+   `npx ghuri startapp blog`; it is added to `INSTALLED_APPS` for you.
 
 </Steps>
 
@@ -118,7 +118,7 @@ The only lines that change when you leave Cloudflare are in `settings.ts` and th
   ```ts title="src/settings.ts"
   DATABASES: { default: d1('DB') },
   STORAGES: { default: r2('MEDIA') },
-  CACHES: { default: kvCache('CACHE') },
+  CACHES: { default: env.CACHE ? kvCache('CACHE') : memoryCache() },
   ```
   </TabItem>
   <TabItem label="Node + Postgres">

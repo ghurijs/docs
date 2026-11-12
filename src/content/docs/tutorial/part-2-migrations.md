@@ -15,15 +15,16 @@ npx ghuri makemigrations
 ```
 Migrations for 'blog':
   src/blog/migrations/0001_initial.ts
-    + Create model Tag
-    + Create model Post
-    + Create model Comment
+    - Create model Tag
+    - Create model Post
+    - Create model Comment
 ```
 
 `makemigrations` loads your project, replays every existing migration to build the *project
 state*, compares that state with your current models, and writes the difference as a new
-migration file. It also regenerates `src/blog/migrations/index.ts`, which imports every
-migration so the bundle contains them.
+migration file. It also regenerates `src/blog/migrations/index.ts`, which re-exports every
+migration (plus an ordered `migrations` map) so the Worker bundle contains them without a
+filesystem.
 
 Open the generated file:
 
@@ -31,6 +32,7 @@ Open the generated file:
 import { Migration, operations as ops } from '@ghuri/orm/migrations'
 
 export default new Migration({
+  initial: true,
   dependencies: [['auth', '0001_initial']],
   operations: [
     ops.CreateModel({
@@ -79,15 +81,16 @@ npx ghuri migrate
 
 ```
 Operations to perform:
-  Apply all migrations: admin, auth, blog
+  Apply all migrations: admin, auth, authtoken, blog, contenttypes, sessions
 Running migrations:
-  Applying auth.0001_initial... OK
-  Applying admin.0001_initial... OK
-  Applying blog.0001_initial... OK
+  Applying blog.0001_initial...
+  blog.0001_initial OK
 ```
 
 `migrate` applies every migration that has not been applied yet and records it in the
-`ghuri_migrations` table. By default the CLI talks to the **local** D1 database that
+`ghuri_migrations` table. The built-in apps were migrated in Part 1, so only `blog` is pending.
+Each migration runs atomically together with its record: in a transaction on SQLite and
+Postgres, as a single `batch()` on D1. By default the CLI talks to the **local** D1 database that
 `wrangler dev` uses (a SQLite file under `.wrangler/state/`). When you deploy in
 [Part 5](/docs/tutorial/part-5-deploy/) you will run the same command with `--remote`.
 
@@ -106,59 +109,64 @@ blog
 The three-step workflow is identical: change `models.ts`, run `makemigrations`, run `migrate`.
 Migration files have the same operations (`CreateModel`, `AddField`, `AlterField`,
 `RunSQL`, ...), the same dependency graph and the same `showmigrations` / `sqlmigrate`
-commands. Data migrations use `ops.RunCode(async (apps, conn) => {...})` instead of
-`RunPython`.
+commands. Data migrations use `ops.RunCode(async (apps, conn, { using }) => {...})` instead
+of `RunPython`, and `apps.getModel('blog', 'Post')` gives you the historical model.
+`makemigrations --empty blog` creates a file to put it in.
 :::
 
 ## Play with the API
 
 `ghuri shell` opens a Node REPL with your settings loaded, apps populated and every model in
-scope. Top-level `await` works.
+scope by class name, plus `apps`, `settings`, `env`, `core`, `orm` and `getModel()`. Top-level
+`await` works.
 
 ```sh
 npx ghuri shell
 ```
 
-First create a user to be the author. The shell exposes `User` from `@ghuri/auth`:
+First create a user to be the author. `User` (from `@ghuri/auth`) is in scope like every other
+installed model:
 
 ```ts
-> const rifat = await User.objects.createUser({ username: 'rifat', password: 'correct horse' })
-> rifat.pk
+ghuri> const rifat = await User.objects.createUser({ username: 'rifat', password: 'correct horse' })
+ghuri> rifat.pk
 1
 ```
 
 Create some posts. `create()` builds an instance, saves it, and returns it:
 
 ```ts
-> const hello = await Post.objects.create({ title: 'Hello, Ghuri', slug: 'hello-ghuri', author: rifat })
-> hello.id
+ghuri> const hello = await Post.objects.create({ title: 'Hello, Ghuri', slug: 'hello-ghuri', author: rifat })
+ghuri> hello.id
 1
-> hello.createdAt
+ghuri> hello.createdAt
 2026-11-12T08:14:03.201Z
-> hello.published
+ghuri> hello.published
 false
 ```
 
 You can also build an instance and save it yourself:
 
 ```ts
-> const draft = new Post({ title: 'Edge databases', slug: 'edge-databases', authorId: rifat.pk })
-> await draft.save()
-> draft.body = 'D1 is SQLite, replicated.'
-> await draft.save({ updateFields: ['body'] })
+ghuri> const draft = new Post({ title: 'Edge databases', slug: 'edge-databases', authorId: rifat.pk })
+ghuri> await draft.save()
+ghuri> draft.body = 'D1 is SQLite, replicated.'
+ghuri> await draft.save({ updateFields: ['body'] })
 ```
 
 Query them back. A QuerySet is lazy and chainable; `await` runs it and gives you an array:
 
 ```ts
-> await Post.objects.all()
+ghuri> await Post.objects.all()
 [ Post { title: 'Edge databases' }, Post { title: 'Hello, Ghuri' } ]
-> await Post.objects.filter({ title__startswith: 'Hello' })
+ghuri> await Post.objects.filter({ title__startswith: 'Hello' })
 [ Post { title: 'Hello, Ghuri' } ]
-> await Post.objects.filter({ author__username: 'rifat' }).count()
+ghuri> await Post.objects.filter({ author__username: 'rifat' }).count()
 2
-> await Post.objects.get({ slug: 'nope' })
+ghuri> await Post.objects.get({ slug: 'nope' })
 Uncaught Post.DoesNotExist: Post matching query does not exist.
+ghuri> await Post.objects.inBulk([1, 2])     // a Map keyed by primary key
+Map(2) { 1 => Post { title: 'Hello, Ghuri' }, 2 => Post { title: 'Edge databases' } }
 ```
 
 Notice `author__username`: the double underscore follows the `author` foreign key to `User` and
@@ -168,34 +176,36 @@ filters on its `username`, exactly like Django. Lookups such as `__startswith`, 
 Work with relations:
 
 ```ts
-> const ts = await Tag.objects.create({ name: 'typescript' })
-> const cf = await Tag.objects.create({ name: 'cloudflare' })
-> await hello.tags.add(ts, cf)
-> await hello.tags.all()
+ghuri> const ts = await Tag.objects.create({ name: 'typescript' })
+ghuri> const cf = await Tag.objects.create({ name: 'cloudflare' })
+ghuri> await hello.tags.add(ts, cf)
+ghuri> await hello.tags.all()
 [ Tag { name: 'typescript' }, Tag { name: 'cloudflare' } ]
-> await cf.posts.all()                 // reverse side, from relatedName: 'posts'
+ghuri> await cf.posts.all()                 // reverse side, from relatedName: 'posts'
 [ Post { title: 'Hello, Ghuri' } ]
-> await rifat.posts.filter({ published: false }).count()
+ghuri> await rifat.posts.filter({ published: false }).count()
 2
-> await Comment.objects.create({ post: hello, author: rifat, body: 'First!' })
-> await hello.comments.count()
+ghuri> await Comment.objects.create({ post: hello, author: rifat, body: 'First!' })
+ghuri> await hello.comments.count()
 1
 ```
 
-Update and delete in bulk, straight from a QuerySet:
+Update and delete in bulk, straight from a QuerySet. `update()` returns the number of rows;
+`delete()` returns `[total, perModel]`, counting the rows removed by cascades too:
 
 ```ts
-> await Post.objects.filter({ slug: 'hello-ghuri' }).update({ published: true })
+ghuri> await Post.objects.filter({ slug: 'hello-ghuri' }).update({ published: true })
 1
-> await Tag.objects.filter({ name: 'cloudflare' }).delete()
-{ count: 2, perModel: { 'blog.Tag': 1, 'blog.Post_tags': 1 } }
+ghuri> await Tag.objects.filter({ name: 'cloudflare' }).delete()
+[ 2, { 'blog.Post_tags': 1, 'blog.Tag': 1 } ]
 ```
 
-Aggregation and annotation look like Django's too:
+Aggregation and annotation look like Django's too. The REPL cannot run `import` statements,
+so take `Count` from the `orm` module that the shell exposes:
 
 ```ts
-> import { Count } from '@ghuri/orm'
-> await Post.objects.annotate({ numComments: Count('comments') }).values('title', 'numComments')
+ghuri> const { Count } = orm
+ghuri> await Post.objects.annotate({ numComments: Count('comments') }).values('title', 'numComments')
 [ { title: 'Edge databases', numComments: 0 }, { title: 'Hello, Ghuri', numComments: 1 } ]
 ```
 

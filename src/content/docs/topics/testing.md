@@ -5,33 +5,34 @@ description: Test Ghuri apps with Vitest, a fresh test database on SQLite, PGlit
 
 Ghuri tests are [Vitest](https://vitest.dev) tests. The framework adds three things: a way to
 start your app without a server (`app.setup(env)`), a fresh database per test run
-(`setupTestDatabase`), and a test client that sends requests through your middleware, URLs and
-views (`createTestClient`).
+(`setupTestDatabase` from `@ghuri/orm/testing`), and a test client that sends requests through
+your middleware, URLs and views (`createTestClient` from `@ghuri/core/testing`).
 
 ## Running tests
 
 ```sh
-npx ghuri test                 # all tests
-npx ghuri test src/blog        # one app
-npx ghuri test -- --watch      # anything after -- goes to vitest
+npx ghuri test                 # vitest run
+npx ghuri test src/blog        # extra arguments go to vitest
+npx ghuri test --watch         # watch mode
 ```
 
-`ghuri test` runs Vitest with a config that understands your project. By default it collects
-`src/**/tests.ts` and `src/**/*.test.ts`. If you need your own `vitest.config.ts`, it is picked up
-automatically.
+`ghuri test` runs the project's own Vitest (install it with `npm install -D vitest`) from the
+project root, so test files are collected by Vitest's defaults or your `vitest.config.ts`
+(`*.test.ts` and `*.spec.ts`; add `include: ['src/**/tests.ts']` if you prefer Django-style
+`tests.ts` modules).
 
 ## A first test
 
-```ts title="src/blog/tests.ts"
+```ts title="src/blog/blog.test.ts"
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { createApp } from '@ghuri/core'
-import { setupTestDatabase } from '@ghuri/orm/testing'
+import { setupTestDatabase, type TestDatabase } from '@ghuri/orm/testing'
 import { User } from '@ghuri/auth'
 import settings from '../settings'
 import { Post } from './models'
 
 const app = createApp(settings)
-let db: Awaited<ReturnType<typeof setupTestDatabase>>
+let db: TestDatabase
 
 beforeAll(async () => {
   await app.setup({ SECRET_KEY: 'test', DEBUG: 'true' })
@@ -57,12 +58,14 @@ What each piece does:
 - **`app.setup(env)`** resolves settings for that `env`, populates `INSTALLED_APPS` and sets a
   global context, so models and caches work outside a request. The `env` stands in for Worker
   bindings or `process.env`.
-- **`setupTestDatabase({ using })`** replaces the `default` database with a new, empty one, runs
-  every migration (or creates tables straight from the models when an app has no migrations
-  yet) and returns `{ flush, teardown }`.
+- **`setupTestDatabase({ using })`** opens a new, empty in-memory database, installs it as
+  `DATABASES.default` in the current context (or in a fresh context if there is none), runs the
+  migrations of installed apps that have some and creates tables directly for every other model,
+  then returns `{ connection, flush, teardown }`. `postMigrate` is sent, so default permissions
+  and content types exist. Options: `alias`, `models` (limit the tables), `createTables: false`.
 - **`flush()`** empties every table but keeps the schema. Calling it in `afterEach` gives each
   test a clean database without re-running migrations.
-- **`teardown()`** closes and deletes the test database.
+- **`teardown()`** closes the test database and restores the previous `DATABASES`.
 
 :::tip[If you know Django]
 Django's `TestCase` wraps each test in a transaction and rolls it back. D1 has no interactive
@@ -80,18 +83,28 @@ of the test runner's database creation.
 | `'pglite'` | [PGlite](https://pglite.dev), Postgres compiled to WASM | Node | You deploy on Postgres, or want to make sure your queries work on both dialects |
 | `'d1'` | D1 through Miniflare | Node | You rely on D1-specific behaviour such as `batch()` semantics or limits |
 
-A good habit is to run the suite on both dialects in CI, so moving from D1 to Postgres is never
-a surprise:
+A good habit is to run the suite on several dialects in CI, so moving from D1 to Postgres is
+never a surprise. `testBackends()` returns the backends listed in `GHURI_TEST_BACKENDS` (all
+three when unset), ready for `describe.each`:
 
 ```ts
-db = await setupTestDatabase({ using: (process.env.TEST_DB as 'sqlite' | 'pglite') ?? 'sqlite' })
+import { setupTestDatabase, testBackends } from '@ghuri/orm/testing'
+
+describe.each(testBackends())('posts on %s', (using) => {
+  let db: TestDatabase
+  beforeAll(async () => { db = await setupTestDatabase({ using }) })
+  afterEach(() => db.flush())
+  afterAll(() => db.teardown())
+  // ...
+})
 ```
 
 ```sh
-TEST_DB=sqlite npx ghuri test && TEST_DB=pglite npx ghuri test
+GHURI_TEST_BACKENDS=sqlite,pglite npx ghuri test
 ```
 
-PGlite needs no Postgres server, so this works on any CI runner.
+PGlite needs no Postgres server, so this works on any CI runner. `captureQueries(fn)` from
+`@ghuri/orm` returns the SQL a block executed, for asserting query counts.
 
 ## The test client
 
@@ -104,25 +117,46 @@ import { createTestClient } from '@ghuri/core/testing'
 
 const client = createTestClient(app, { env: { SECRET_KEY: 'test', DEBUG: 'true' } })
 
-const res = await client.get('/blog/api/posts/?search=ghuri')
+const res = await client.get('/blog/api/posts/', { query: { search: 'ghuri' } })
 expect(res.status).toBe(200)
 expect((await res.json()).count).toBe(1)
 
 await client.post('/blog/api/posts/', { json: { title: 'Via test', slug: 'via-test' } })
-await client.post('/accounts/login/', { form: { username: 'a', password: 'pw-123456' } })
+await client.post('/contact/', { form: { email: 'a@b.c', attachment: new File(['x'], 'x.txt') } })
 await client.patch('/blog/api/posts/via-test/', {
   json: { published: true },
   headers: { Authorization: `Token ${token}` },
 })
 await client.delete('/blog/api/posts/via-test/')
+
+const followed = await client.get('/old-url/', { follow: true })
+followed.redirectChain   // [['/new-url/', 301]]
 ```
 
-- `get`, `post`, `put`, `patch` and `delete` take a path and `{ json?, form?, headers? }`.
-  `json` sets `Content-Type: application/json`; `form` sends
-  `application/x-www-form-urlencoded`.
-- Responses are standard `Response` objects.
-- **Cookies persist** between requests on the same client, so sessions and CSRF work as in a
-  browser. Form posts automatically include the `csrftoken` the client has received.
+- `get`, `head`, `options`, `post`, `put`, `patch` and `delete` take a path and
+  `{ json?, form?, body?, query?, headers?, follow?, csrf? }`. `json` sets
+  `Content-Type: application/json`; `form` sends `application/x-www-form-urlencoded`, or
+  `multipart/form-data` when it contains a `File`/`Blob` or is a `FormData`.
+- Responses are standard `Response` objects, plus `redirectChain` and `request`.
+- **Cookies persist** between requests on the same client (`client.getCookie()`,
+  `setCookie()`, `clearCookies()`), so sessions work as in a browser.
+- **CSRF is handled for you.** Unsafe requests send the `csrftoken` cookie's value as
+  `X-CSRFToken`, creating a cookie first if there is none. Pass `csrf: false` (per client or per
+  request) to test CSRF failures.
+- `client.waitForBackgroundTasks()` awaits everything views passed to `waitUntil()`.
+- `client.withContext(fn)` runs `fn` inside a context for the client's `env`, for creating
+  fixtures with the app's settings.
+
+Requests go to `http://testserver` (change it with `baseUrl`).
+
+:::caution
+Unlike Django, Ghuri does not add `testserver` to `ALLOWED_HOSTS` during tests. If your settings
+restrict `ALLOWED_HOSTS`, include `'testserver'` when testing (or set `baseUrl` to an allowed
+host), or every request answers 400.
+:::
+
+The client is fetch-based, so it also works inside `workerd` with
+`@cloudflare/vitest-pool-workers`.
 
 ### Logging in
 
@@ -135,10 +169,19 @@ await client.forceLogin(editor)
 
 const res = await client.get('/admin/blog/post/')
 expect(res.status).toBe(403)   // logged in, but not staff
+
+await client.login({ username: 'editor', password: 'pw-123456' })   // true / false
+await client.logout()
 ```
 
-`forceLogin` is provided by `@ghuri/auth`. It only works when `AuthConfig` and
-`SessionMiddleware` are installed.
+`forceLogin`, `login` and `logout` are provided by `@ghuri/auth`: importing it registers them
+as test client hooks. They need sessions to work, so install `SessionsConfig` (for the default
+`db` session engine) and `SessionMiddleware`. Use a fast password hasher in tests:
+`PASSWORD_HASHERS: [new PBKDF2PasswordHasher({ iterations: 1000 })]`.
+
+Packages extend the client the same way. `registerTestClientHook(name, fn)` from
+`@ghuri/core/testing` registers a hook, and `client.callHook(name, ...args)` calls it; the names
+`forceLogin`, `login` and `logout` back the methods of the same name.
 
 ## Testing management commands
 
@@ -158,6 +201,21 @@ it('publishes drafts', async () => {
 
 See [Management commands](/docs/topics/management-commands/).
 
+## Testing cron and queue handlers
+
+The object `createApp()` returns has the Workers `scheduled` and `queue` handlers, so tests can
+call them directly with a fake event:
+
+```ts
+await app.scheduled({ cron: '0 * * * *', scheduledTime: Date.now() }, env)
+
+const msg = { id: '1', timestamp: new Date(), body: { postId: 1 }, ack: vi.fn(), retry: vi.fn() }
+await app.queue({ queue: 'emails', messages: [msg], ackAll: vi.fn(), retryAll: vi.fn() }, env)
+expect(msg.ack).toHaveBeenCalled()
+```
+
+See [Background tasks](/docs/topics/background-tasks/).
+
 ## Other services in tests
 
 Configure test-friendly backends through the `env` you pass to `app.setup`, the same way
@@ -173,10 +231,10 @@ with no extra setup.
 
 To test against real Workers bindings (KV, R2, Durable Objects), use Cloudflare's
 [`@cloudflare/vitest-pool-workers`](https://developers.cloudflare.com/workers/testing/vitest-integration/)
-and pass its `env` to `app.setup`. Tests then run inside `workerd`.
+and pass its `env` to `app.setup` and `createTestClient`. Tests then run inside `workerd`.
 
 :::note[Alpha]
-The test database helpers (`setupTestDatabase`, `flush`, `teardown`) and the `ghuri test`
-defaults are still being settled. Expect a per-test transactional mode on SQLite and PGlite, and
-possibly a `using: 'd1'` option tied to the Workers Vitest pool.
+There is no per-test transactional mode yet: isolation comes from `flush()`, which empties
+every table (one `DELETE` per table on SQLite and D1, one `TRUNCATE` on Postgres). Group tests
+that can share data in one `describe` with a single `flush()` if this gets slow.
 :::

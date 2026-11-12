@@ -51,16 +51,16 @@ cannot express.
 
 ## The packages
 
-Ghuri is split into packages under the `@ghuri` npm scope. A new project installs all of them;
-you can drop the ones you do not use.
+Ghuri is split into packages under the `@ghuri` npm scope. A new project installs all of them
+except `@ghuri/agents`, which you add when you want it; you can drop the ones you do not use.
 
 | Package | Contains |
 |---|---|
 | `@ghuri/core` | settings, app registry, URLs, views, middleware, request context, signals, cache, management command base, test client, Node adapter |
 | `@ghuri/orm` | `Model`, fields, managers and QuerySets, relations, database adapters (D1, Postgres, SQLite, PGlite), migrations |
-| `@ghuri/auth` | users, groups, permissions, password hashing, sessions, tokens, JWT |
+| `@ghuri/auth` | content types, users, groups, permissions, password hashing, sessions, tokens, JWT; REST authentication in `@ghuri/auth/rest` |
 | `@ghuri/rest` | serializers, API views, viewsets, routers, permissions, pagination, filters, throttling, OpenAPI |
-| `@ghuri/storage` | storage API with R2, S3, filesystem and memory backends; `FileField`, `ImageField` |
+| `@ghuri/storage` | storage API with R2, S3, filesystem (`@ghuri/storage/fs`) and memory backends; `FileField`, `ImageField` |
 | `@ghuri/admin` | the admin site, server-rendered with Hono JSX and htmx |
 | `@ghuri/agents` | AI agents whose tools come from your models and viewsets; an MCP server |
 | `@ghuri/cli` | the `ghuri` command |

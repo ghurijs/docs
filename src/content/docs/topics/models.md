@@ -61,13 +61,30 @@ of class property declarations, TypeScript can infer the instance type:
 | `BooleanField` | `boolean` |
 | `DateTimeField` | `Date` |
 | `DateField`, `TimeField` | `string` (`'YYYY-MM-DD'`, `'HH:MM:SS'`) |
-| `JSONField` | `unknown` (or the type parameter: `new JSONField<Settings>()`) |
+| `JSONField` | `any` (or the type parameter: `new JSONField<Settings>()`) |
 | any field with `null: true` | `T \| null` |
-| `ForeignKey` named `author` | `authorId: number` plus `author` (awaitable related object) |
+| `ForeignKey` named `author` | `authorId: number` plus `author` (`User \| PromiseLike<User>`: await it, or read it directly once loaded) |
 | `ManyToManyField` | a related manager |
 
 Every model gets an implicit `id: new BigAutoField({ primaryKey: true })` unless a field sets
 `primaryKey: true`. `instance.pk` is an alias for whichever field is the primary key.
+
+### Typing results and reverse relations
+
+`declare static objects: Manager<Post>` is what makes `Post.objects.get()` return a `Post`
+(with your methods and getters). Without it, results are typed from the fields only. Reverse
+relations are created at runtime when the other model is registered, so declare them for
+TypeScript too. Always use `declare` (not a class field with an initializer) for these extra
+typings:
+
+```ts
+import { type Manager, type RelatedManager } from '@ghuri/orm'
+
+export class Post extends Model({ /* ... */ }) {
+  declare static objects: Manager<Post>
+  declare comments: RelatedManager<Comment>   // from Comment.post's relatedName: 'comments'
+}
+```
 
 `BaseModel` is the real root class. Use it for `instanceof` checks and in generic code:
 `function describe(obj: BaseModel) { return obj._meta.label }`.
@@ -123,6 +140,43 @@ prefer `blank: true, default: ''` to `null: true`, so there is only one "empty" 
 | `defaultPermissions` | Default `['add', 'change', 'delete', 'view']`. |
 | `getLatestBy` | Field used by `latest()` / `earliest()`. |
 | `appLabel` | Override the app the model belongs to. |
+| `managed` | `false` means Ghuri never creates, alters or flushes the table (migrations still track the model's state). Default `true`. |
+| `defaultManagerName` | Manager used by related lookups and internals. Default `objects`. |
+
+Indexes are `{ fields, name?, unique?, condition? }`, where `condition` is a raw SQL `WHERE`
+clause for a partial index and a leading `-` in `fields` makes that column descending.
+Constraints are `{ type: 'unique', fields, name, condition? }` or
+`{ type: 'check', check: 'price >= 0', name }`:
+
+```ts
+static Meta = {
+  indexes: [{ fields: ['-createdAt', 'status'], name: 'post_recent_idx' }],
+  constraints: [
+    { type: 'unique', fields: ['author', 'slug'], name: 'post_author_slug_uniq' },
+    { type: 'check', check: 'views >= 0', name: 'post_views_gte_0' },
+  ],
+}
+```
+
+## Registering models
+
+A model gets its app label (and so its table name, `blog_post`) from the app that lists it:
+
+```ts title="src/blog/app.ts"
+import { AppConfig } from '@ghuri/core'
+import * as models from './models'
+
+export class BlogConfig extends AppConfig {
+  name = 'blog'
+  models = models
+}
+```
+
+Outside `INSTALLED_APPS` (scripts, tests), set `Meta.appLabel` or call
+`registerModels('blog', models)`. Reverse relations only exist once the model declaring the
+foreign key is registered. To build a model class at runtime, use
+`createModelClass('Post', fields, { meta, registry })`; this is what migrations use for
+historical models, with an isolated `new ModelRegistry({ isolated: true })`.
 
 ## Model metadata: `_meta`
 
@@ -186,8 +240,10 @@ export class Post extends Model({ /* ... */ }) {
 await Post.live.byTag('typescript').count()
 ```
 
-As in Django, the first manager is not special: `objects` always exists, and extra managers are
-static properties.
+`objects` always exists, and extra managers are static properties. To change the default
+manager's behaviour, assign your own: `static objects = new PostManager()`. Unlike Django, the
+default manager (used for related lookups) is always `objects` unless you set
+`Meta.defaultManagerName`.
 
 ## Saving, deleting and validating
 
@@ -196,13 +252,19 @@ const post = new Post({ title: 'Hi', slug: 'hi', authorId: 1 })
 await post.save()                                   // INSERT
 post.title = 'Hello'
 await post.save({ updateFields: ['title'] })        // UPDATE only that column
-await post.refreshFromDb()
-await post.delete()                                 // runs ON DELETE rules, signals
+await post.refreshFromDb()                          // or refreshFromDb({ fields: ['title'] })
+await post.delete()                                 // [total, { 'blog.Post': 1, 'blog.Comment': 3 }]
 ```
 
+`save()` also accepts `{ forceInsert, forceUpdate, using }`. `delete()` runs the `onDelete`
+rules of every foreign key pointing at the object, sends delete signals and returns the number
+of deleted rows, in total and per model.
+
 `save()` does not validate. Call `fullClean()` first when data comes from users (the admin and
-`ModelSerializer` do this for you). It runs field validation, `choices`, `unique` checks and your
-`clean()` method, and throws `ValidationError` with a `messageDict`:
+`ModelSerializer` do this for you). It runs field validation, `choices`, your `clean()` method,
+foreign-key existence checks and uniqueness checks (`unique`, `uniqueTogether`, unique
+constraints) against the database, and throws `ValidationError` with a `messageDict`.
+`fullClean({ exclude: ['slug'], validateUnique: false })` narrows it:
 
 ```ts
 import { ValidationError } from '@ghuri/core'
@@ -231,6 +293,11 @@ async save(opts?: { updateFields?: string[] }) {
 }
 ```
 
+When the database itself rejects a write, the error is normalised across backends:
+`IntegrityError` (unique, foreign key, `NOT NULL` or check violations), `NotSupportedError`, or
+the base `DatabaseError`, all exported from `@ghuri/orm`. Deletes refused by `onDelete` raise
+`ProtectedError` or `RestrictedError`; an unknown field in a query raises `FieldError`.
+
 For behaviour that should run for every save including `bulkCreate`, prefer
 [signals](/docs/topics/signals/) or explicit service functions; like Django, bulk operations do
 not call `save()`.
@@ -243,7 +310,8 @@ fields and relations, use a [serializer](/docs/topics/rest/serializers/).
 
 ## The escape hatch
 
-Each model also has a generated Drizzle table, for queries the ORM cannot express:
+QuerySets compile to SQL with the ORM's own builder (`qs.toSQL()` returns `{ sql, params }`),
+but each model also has a generated Drizzle table, for queries the ORM cannot express:
 
 ```ts
 import { getDrizzle } from '@ghuri/orm'
@@ -254,5 +322,11 @@ const posts = Post.table()
 const rows = await db.select({ day: sql`date(${posts.createdAt})`, n: sql`count(*)` })
   .from(posts).groupBy(sql`1`)
 ```
+
+`Post.table()` uses the dialect of the default database; `getTable(Post, 'postgresql')` and
+`getSchema([Post, Comment], dialect)` (keyed by class name, including auto-created
+many-to-many tables) build tables for a given dialect, and `field.drizzleColumn(dialect)`
+builds a single column. Drizzle columns are keyed by attribute name (`posts.createdAt`,
+`posts.authorId`), and values are converted the same way the ORM converts them.
 
 Code written this way is dialect-specific when it uses raw SQL, so keep it in one place.

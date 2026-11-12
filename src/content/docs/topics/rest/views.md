@@ -15,41 +15,47 @@ drop down when you need more control:
 :::tip[If you know Django]
 These are DRF's classes with DRF's hook names in `camelCase`: `get_queryset` → `getQueryset`,
 `get_object` → `getObject`, `get_serializer_class` → `getSerializerClass`, `perform_create` →
-`performCreate`, `@action(detail=True)` → `@action({ detail: true })`. Handlers receive Hono's
-`Context` (`c`), and the DRF `request` is available as `this.request`.
+`performCreate`, `@action(detail=True)` → `@action({ detail: true })`. Handlers receive
+`(request, kwargs)`: the DRF request and the URL keyword arguments. Both are also on the view as
+`this.request` and `this.kwargs`, and the Hono context is `this.c`.
 :::
 
 ## The request object
 
-Inside any API view, `this.request` wraps the incoming request:
+The handler's `request` argument (also `this.request`) is an `APIRequest` wrapping the incoming
+request:
 
 | Property | Contents |
 |---|---|
-| `this.request.data` | Parsed body (JSON, form or multipart). Files are `File` objects |
-| `this.request.query` | Query parameters as `Record<string, string>`; `queryAll(name)` for repeats |
-| `this.request.user` | The authenticated user, or `AnonymousUser` |
-| `this.request.auth` | Whatever the authentication class returned as the token |
-| `this.request.method` | `'GET'`, `'POST'`, … |
-| `this.request.raw` | The underlying `Request` |
+| `request.data` | Parsed body (JSON, form or multipart). Files are `File` objects |
+| `request.files` | Uploaded files by field name |
+| `request.query` | Query parameters as `Record<string, string>` (first value per key) |
+| `request.queryParams` | The full `URLSearchParams` (DRF's `query_params`), for repeated keys |
+| `request.user` | The authenticated user, or `AnonymousUser` |
+| `request.auth` | Whatever the authentication class returned as the token |
+| `request.method` | `'GET'`, `'POST'`, … |
+| `request.raw` | The underlying fetch `Request` |
+| `request.c` | The Hono context |
 
-The handler's `c` argument is the Hono context, so `c.req.param('pk')`, `c.header()` and
-`c.get('session')` are all available.
+`request.data` is parsed before the handler runs, so it is a plain property, not a promise. On
+the view, `this.kwargs` holds the URL keyword arguments, `this.format` the requested format
+suffix, and `this.c` the Hono context (`this.c.get('session')`, `this.c.env` …).
 
 ## APIView
 
-Subclass `APIView` and add methods named after HTTP verbs. Return a `Response`, or use
-`APIResponse` which serializes `data` to JSON and sets the status.
+Subclass `APIView` and add methods named after HTTP verbs. Return an `APIResponse` (DRF's
+`Response`, rendered by content negotiation), any fetch `Response` (sent as is), or plain data,
+which is wrapped in an `APIResponse` for you.
 
 ```ts title="src/blog/views.ts"
-import type { Context } from 'hono'
-import { APIView, APIResponse, IsAuthenticated } from '@ghuri/rest'
+import { APIView, APIResponse, IsAuthenticated, type APIRequest } from '@ghuri/rest'
 import { Post } from './models'
 
 export class StatsView extends APIView {
   permissionClasses = [IsAuthenticated]
 
-  async get(c: Context) {
-    const user = this.request.user
+  async get(request: APIRequest) {
+    const user = request.user
     const [total, published] = await Promise.all([
       Post.objects.filter({ author: user.pk }).count(),
       Post.objects.filter({ author: user.pk, published: true }).count(),
@@ -63,11 +69,15 @@ export class StatsView extends APIView {
 path('api/stats/', StatsView.asView(), { name: 'stats' })
 ```
 
-Methods you do not define return `405 Method Not Allowed` with an `Allow` header. Policy
+Methods you do not define return `405 Method Not Allowed` with an `Allow` header. `OPTIONS`
+returns metadata (`SimpleMetadata`), including the fields a `POST` or `PUT` accepts. Policy
 attributes you can set on any API view:
 
-`authenticationClasses`, `permissionClasses`, `throttleClasses`, `parserClasses`,
-`renderers` (JSON by default), plus `initial(c)` and `handleException(err)` hooks.
+`authenticationClasses`, `permissionClasses`, `throttleClasses`, `throttleScope`,
+`parserClasses`, `rendererClasses` (JSON plus the browsable API by default),
+`contentNegotiationClass`, `metadataClass` and `schema`. Override `initial(request)`,
+`handleException(exc)`, `finalizeResponse()`, `getPermissions()` or `checkObjectPermissions()`
+as in DRF. API views are CSRF-exempt; session-based authentication enforces CSRF itself.
 
 ## GenericAPIView
 
@@ -78,10 +88,11 @@ attributes you can set on any API view:
 | `queryset` | Base QuerySet. Re-evaluated per request, so it is safe to set on the class |
 | `serializerClass` | Serializer used for input and output |
 | `lookupField` / `lookupUrlKwarg` | Default `'pk'` |
-| `paginationClass`, `filterBackends` | Override the `REST_FRAMEWORK` defaults |
+| `paginationClass`, `filterBackends` | Override the `REST_FRAMEWORK` defaults (`paginationClass = null` disables paging) |
 | `getQueryset()` | Override to scope by user, add annotations, … |
 | `getObject()` | Loads one object (404 if missing) and runs object permissions |
-| `getSerializer(...)` / `getSerializerClass()` | Build the serializer with context |
+| `getSerializer(opts)` / `getSerializerClass()` | Build the serializer; `opts` are serializer options, `context` is added |
+| `getSerializerContext()` | `{ request, view, format }` |
 | `filterQueryset(qs)` | Applies the filter backends |
 | `paginateQueryset(qs)` / `getPaginatedResponse(data)` | Pagination hooks |
 
@@ -103,15 +114,15 @@ single objects with `getObject()` so that object permissions run.
 | `RetrieveUpdateDestroyAPIView` | `get`, `put`, `patch`, `delete` |
 
 ```ts
-export class CommentList extends ListCreateAPIView<Comment> {
+export class CommentList extends ListCreateAPIView {
   serializerClass = CommentSerializer
 
   getQueryset() {
-    return Comment.objects.filter({ post: Number(this.c.req.param('postId')) }).selectRelated('author')
+    return Comment.objects.filter({ post: this.kwargs.postId }).selectRelated('author')
   }
 
   async performCreate(serializer: CommentSerializer) {
-    await serializer.save({ author: this.request.user, postId: Number(this.c.req.param('postId')) })
+    await serializer.save({ author: this.request.user, postId: this.kwargs.postId })
   }
 }
 
@@ -119,7 +130,7 @@ export class CommentList extends ListCreateAPIView<Comment> {
 path('api/posts/<int:postId>/comments/', CommentList.asView())
 ```
 
-`this.c` holds the current Hono context for hooks that do not receive it as an argument.
+`this.kwargs` holds the URL keyword arguments for hooks that do not receive them as an argument.
 
 ## Mixins
 
@@ -127,24 +138,29 @@ The generic views are compositions of `GenericAPIView` and these mixins:
 
 | Mixin | Method | Hooks |
 |---|---|---|
-| `ListModelMixin` | `list(c)` | — |
-| `CreateModelMixin` | `create(c)` | `performCreate(serializer)` |
-| `RetrieveModelMixin` | `retrieve(c)` | — |
-| `UpdateModelMixin` | `update(c)`, `partialUpdate(c)` | `performUpdate(serializer)` |
-| `DestroyModelMixin` | `destroy(c)` | `performDestroy(instance)` |
+| `ListModelMixin` | `list(request)` | — |
+| `CreateModelMixin` | `create(request)` | `performCreate(serializer)` |
+| `RetrieveModelMixin` | `retrieve(request)` | — |
+| `UpdateModelMixin` | `update(request)`, `partialUpdate(request)` | `performUpdate(serializer)` |
+| `DestroyModelMixin` | `destroy(request)` | `performDestroy(instance)` |
 
-TypeScript has no multiple inheritance, so mixins are functions that extend a base class:
+TypeScript has no multiple inheritance, so mixins are class factories: functions that take a
+base class and return a subclass. DRF's
+`class TagList(ListModelMixin, CreateModelMixin, GenericAPIView)` becomes:
 
 ```ts
-import { GenericAPIView, ListModelMixin, CreateModelMixin } from '@ghuri/rest'
+import { GenericAPIView, GenericViewSet, ListModelMixin, CreateModelMixin, type APIRequest } from '@ghuri/rest'
 
-export class TagList extends ListModelMixin(CreateModelMixin(GenericAPIView<Tag>)) {
+export class TagList extends ListModelMixin(CreateModelMixin(GenericAPIView)) {
   queryset = Tag.objects.all()
   serializerClass = TagSerializer
 
-  async get(c: Context) { return this.list(c) }
-  async post(c: Context) { return this.create(c) }
+  async get(request: APIRequest) { return this.list(request) }
+  async post(request: APIRequest) { return this.create(request) }
 }
+
+// a viewset with only list and create
+export class TagViewSet extends CreateModelMixin(ListModelMixin(GenericViewSet)) {}
 ```
 
 ## ViewSets
@@ -161,8 +177,10 @@ it defines actions (`list`, `create`, `retrieve`, `update`, `partialUpdate`, `de
 | `ModelViewSet` | all six actions |
 
 ```ts title="src/blog/views.ts"
-import type { Context } from 'hono'
-import { ModelViewSet, IsAuthenticatedOrReadOnly, SearchFilter, OrderingFilter, FieldFilter, action, APIResponse } from '@ghuri/rest'
+import {
+  ModelViewSet, IsAuthenticatedOrReadOnly, SearchFilter, OrderingFilter, FieldFilter,
+  action, APIResponse, type APIRequest,
+} from '@ghuri/rest'
 import { Post } from './models'
 import { PostSerializer, PostListSerializer } from './serializers'
 import { IsAuthorOrReadOnly } from './permissions'
@@ -193,7 +211,7 @@ export class PostViewSet extends ModelViewSet<Post> {
   }
 
   @action({ detail: true, methods: ['post'] })
-  async publish(c: Context) {
+  async publish(request: APIRequest) {
     const post = await this.getObject()
     post.published = true
     await post.save({ updateFields: ['published'] })
@@ -201,34 +219,50 @@ export class PostViewSet extends ModelViewSet<Post> {
   }
 
   @action({ detail: false })
-  async mine(c: Context) {
-    const qs = this.filterQueryset(this.getQueryset().filter({ author: this.request.user.pk }))
+  async mine(request: APIRequest) {
+    const qs = this.filterQueryset(this.getQueryset().filter({ author: request.user.pk }))
     const page = await this.paginateQueryset(qs)
-    const data = await this.getSerializer(page ?? qs, { many: true }).getData()
+    const data = await this.getSerializer({ instance: page ?? qs, many: true }).getData()
     return page ? this.getPaginatedResponse(data) : new APIResponse(data)
   }
 }
 ```
 
 `this.action` is the name of the action being run (`'list'`, `'publish'`, …). Use it to vary the
-queryset, serializer or permissions per action.
+queryset, serializer or permissions per action. `this.detail` and `this.basename` are set too, and
+`this.reverseAction('detail', { pk })` builds the absolute URL of another route of the viewset.
 
 ### Custom actions
 
-`@action` is a standard TC39 decorator; do not enable `experimentalDecorators`. Options:
+`@action` is a standard TC39 (stage 3) decorator, which TypeScript 5, esbuild and wrangler compile
+by default. It also works as a legacy `experimentalDecorators` decorator. Options:
 
 | Option | Default | Meaning |
 |---|---|---|
 | `detail` | required | `true` → `/posts/<pk>/publish/`; `false` → `/posts/mine/` |
 | `methods` | `['get']` | Allowed HTTP methods |
-| `urlPath` | method name | URL segment |
-| `urlName` | method name | Route name suffix, e.g. `post-publish` |
-| `permissionClasses`, `serializerClass`, … | inherited | Per-action overrides |
+| `urlPath` | method name in kebab-case | URL segment (`setFeatured` → `set-featured/`) |
+| `urlName` | method name in kebab-case | Route name suffix, e.g. `post-set-featured` |
+| `permissionClasses`, `serializerClass`, `throttleScope`, `name`, … | inherited | Per-action overrides |
 
 ```ts
-@action({ detail: true, methods: ['post'], permissionClasses: [IsAdminUser], urlPath: 'set-featured' })
-async setFeatured(c: Context) { ... }
+@action({ detail: true, methods: ['post'], permissionClasses: [IsAdminUser] })
+async setFeatured(request: APIRequest) { ... }   // POST /posts/<pk>/set-featured/
 ```
+
+Without decorators, list the actions in a static map:
+
+```ts
+class PostViewSet extends ModelViewSet<Post> {
+  static actions = { publish: action({ detail: true, methods: ['post'] }) }
+  async publish(request: APIRequest) { ... }
+}
+```
+
+:::caution[Vitest]
+Vite 8 transforms TypeScript with oxc, which does not lower TC39 decorators yet. Either
+pre-transform test files with esbuild in `vitest.config.ts` or use `static actions`.
+:::
 
 ## Function-based API views
 
@@ -236,15 +270,20 @@ For small endpoints, wrap a function with `apiView()`. You get the request wrapp
 authentication, permissions and exception handling, without a class.
 
 ```ts
-import { apiView, APIResponse, IsAuthenticated } from '@ghuri/rest'
+import { apiView, IsAuthenticated } from '@ghuri/rest'
 
 export const whoami = apiView(['GET'], { permissionClasses: [IsAuthenticated] })(
-  async (request, c) => new APIResponse({ id: request.user.pk, username: request.user.username }),
+  async (request, kwargs) => ({ id: request.user.pk, username: request.user.username }),
 )
 
 // urls.ts
 path('api/whoami/', whoami)
 ```
+
+The function receives `(request, kwargs, view)`; plain data is wrapped in an `APIResponse`. The
+options object takes the same policy attributes as `APIView` (`rendererClasses`,
+`parserClasses`, `authenticationClasses`, `permissionClasses`, `throttleClasses`,
+`throttleScope`, `schema` …).
 
 ## Plain Hono views still work
 

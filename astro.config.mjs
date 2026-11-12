@@ -54,7 +54,10 @@ export default defineConfig({
                 { slug: 'topics/transactions' },
               ],
             },
-            { slug: 'topics/admin' },
+            {
+              label: 'Admin',
+              items: [{ slug: 'topics/admin' }, { slug: 'topics/admin-reference' }],
+            },
             {
               label: 'REST framework',
               items: [
@@ -71,12 +74,18 @@ export default defineConfig({
               ],
             },
             { slug: 'topics/authentication' },
+            { slug: 'topics/auth-tokens' },
             { slug: 'topics/file-storage' },
+            { slug: 'topics/storage-backends' },
             { slug: 'topics/caching' },
             { slug: 'topics/signals' },
+            { slug: 'topics/background-tasks' },
             { slug: 'topics/management-commands' },
             { slug: 'topics/testing' },
-            { slug: 'topics/agents' },
+            {
+              label: 'AI agents',
+              items: [{ slug: 'topics/agents' }, { slug: 'topics/agents-mcp' }],
+            },
           ],
         },
         {

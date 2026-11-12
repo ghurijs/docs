@@ -7,19 +7,15 @@ A serializer does two jobs. Going in, it turns untrusted request data into valid
 can save. Going out, it turns model instances into plain JSON-ready objects. It is the API
 equivalent of a Django form.
 
-:::note[Alpha]
-Serializer output is asynchronous because related objects may need a database query. The
-documented API is `await serializer.getData()`. The method name may still change before 0.1
-(alternatives under discussion are `resolve()` and `toRepresentationAsync()`); the behaviour will
-not.
-:::
-
 :::tip[If you know Django]
 Everything you know from DRF carries over, with three mechanical changes:
 
-- `serializer.data` → `await serializer.getData()`
+- `serializer.data` → `await serializer.getData()` (afterwards `serializer.data` returns the
+  cached value)
 - `serializer.is_valid(raise_exception=True)` → `await serializer.isValid({ raiseException: true })`
 - `validate_<field>` → `validate<Field>` (`validate_title` becomes `validateTitle`)
+- `Serializer(instance, data=..., partial=True)` → `new Serializer({ instance, data, partial: true })`:
+  one options object. A lone model instance is also accepted: `new PostSerializer(post)`.
 :::
 
 ## Declaring a serializer
@@ -64,16 +60,21 @@ await serializer.isValid({ raiseException: true })
 
 ### Serializing
 
-Pass an instance (or an array with `many: true`) and await the output:
+Pass an instance (or a list or QuerySet with `many: true`) and await the output:
 
 ```ts
 const post = await Post.objects.get({ slug: 'hello' })
-const data = await new PostSerializer(post).getData()
+const data = await new PostSerializer(post).getData()   // same as new PostSerializer({ instance: post })
 // { id: 1, title: 'Hello', slug: 'hello', author: 'rifat', ... }
 
-const posts = await Post.objects.filter({ published: true })
-const list = await new PostSerializer(posts, { many: true }).getData()
+const posts = Post.objects.filter({ published: true })
+const list = await new PostSerializer({ instance: posts, many: true }).getData()
+// typed alternative: PostSerializer.many({ instance: posts }) returns a ListSerializer
 ```
+
+The constructor takes one options object: `instance`, `data`, `partial`, `context` (generic views
+pass `{ request, view, format }`), `many`, plus any field option (`readOnly`, `required` …) for
+when the serializer is nested as a field.
 
 ## ModelSerializer
 
@@ -119,9 +120,15 @@ export class PostSerializer extends ModelSerializer<Post> {
 | `readOnlyFields` | Included in output, ignored on input |
 | `extraKwargs` | Per-field option overrides, e.g. `{ password: { writeOnly: true } }` |
 | `depth` | Render relations as nested objects this many levels deep (read only) |
-| `validators` | Serializer-level validators such as `UniqueTogetherValidator` |
+| `validators` | Serializer-level validators such as `UniqueTogetherValidator` (replaces the generated ones) |
+| `fullClean` | Also run the model's `fullClean()` (field validators, `clean()`, uniqueness) before saving; its errors become a `400` |
+| `listSerializerClass` | The `ListSerializer` subclass used for `many: true` |
 
-A field declared on the class always wins over the generated one with the same name.
+A field declared on the class always wins over the generated one with the same name. Unlike DRF,
+a declared field missing from `Meta.fields` is appended instead of raising. Reverse relations
+(`comments`) may be listed in `fields` and are read only. `HyperlinkedModelSerializer` renders
+relations as URLs and adds a `url` field, resolved through the `<model>-detail` URL names that
+routers create.
 
 ### Relations
 
@@ -196,13 +203,14 @@ await serializer.isValid({ raiseException: true })
 const post = await serializer.save({ author: this.request.user })
 
 // update
-const edit = new PostSerializer(post, { data: { title: 'New title' }, partial: true })
+const edit = new PostSerializer({ instance: post, data: { title: 'New title' }, partial: true })
 await edit.isValid({ raiseException: true })
 await edit.save()
 ```
 
-`ModelSerializer.create()` handles many-to-many fields after the instance is saved, so `tags`
-works without extra code.
+`ModelSerializer.create()` and `update()` set many-to-many fields after the instance is saved, so
+`tags` works without extra code. On a plain `Serializer` you write `create()` and `update()`
+yourself; `save()` throws if the one it needs is missing.
 
 ## Fields
 
@@ -211,20 +219,25 @@ All fields accept `readOnly`, `writeOnly`, `required`, `default`, `allowNull`, `
 
 | Field | Notes |
 |---|---|
-| `CharField` | `maxLength`, `minLength`, `allowBlank`, `trimWhitespace` |
-| `EmailField`, `URLField`, `UUIDField` | Validated strings |
+| `CharField` | `maxLength`, `minLength`, `allowBlank`, `trimWhitespace` (default `true`) |
+| `EmailField`, `URLField`, `UUIDField`, `SlugField`, `IPAddressField`, `RegexField` | Validated strings |
 | `IntegerField`, `FloatField` | `minValue`, `maxValue` |
 | `DecimalField` | `maxDigits`, `decimalPlaces`; values are strings, as in the ORM |
-| `BooleanField` | Accepts `true`/`false`, `"true"`, `"1"`, `"on"` … |
-| `DateTimeField`, `DateField` | ISO 8601 in and out |
+| `BooleanField`, `NullBooleanField` | Accepts `true`/`false`, `"true"`, `"1"`, `"on"` … |
+| `DateTimeField`, `DateField`, `TimeField` | ISO 8601 in and out |
+| `DurationField` | Milliseconds (the ORM's representation); output uses DRF's `[DD ]HH:MM:SS[.uuuuuu]` |
 | `ChoiceField`, `MultipleChoiceField` | `choices` as `[value, label][]` |
 | `ListField`, `DictField` | `child` field for elements |
 | `JSONField` | Any JSON value |
 | `FileField`, `ImageField` | Multipart uploads; see [File storage](/docs/topics/file-storage/) |
 | `SerializerMethodField` | Read only, calls `get<Name>()` |
 | `PrimaryKeyRelatedField`, `SlugRelatedField`, `StringRelatedField` | Relations |
+| `HyperlinkedRelatedField`, `HyperlinkedIdentityField` | Relations as URLs, via `reverse()` |
 | `HiddenField` | Not in input or output; value from `default`, e.g. `CurrentUserDefault` |
 | `ReadOnlyField` | Renders the attribute as is |
+
+`default` may be a value, a function, or `new CurrentUserDefault()`. `source` takes a dotted path
+(`'author.username'`, awaiting the relation) or `'*'` for the whole object.
 
 `HiddenField` with `CurrentUserDefault` is the idiomatic way to set an owner without trusting the
 client:
@@ -237,7 +250,8 @@ author = new HiddenField({ default: new CurrentUserDefault() })
 
 Field-level validation runs in this order: the field's own checks, its `validators`, then the
 serializer's `validate<Field>()` method. Object-level validation (`Meta.validators`, then
-`validate()`) runs once every field is valid.
+`validate()`) runs once every field is valid. Validators and hooks may be async and may throw
+either the REST `ValidationError` or `@ghuri/core`'s, so the ORM's validators work unchanged.
 
 ```ts
 import { UniqueValidator, UniqueTogetherValidator } from '@ghuri/rest'
@@ -251,17 +265,18 @@ static Meta = {
 }
 ```
 
-`ModelSerializer` adds `UniqueValidator` automatically for model fields with `unique: true`.
-Errors raised from `validate()` without a field key go under `non_field_errors`
-(configurable with `NON_FIELD_ERRORS_KEY`).
+`ModelSerializer` adds `UniqueValidator` automatically for model fields with `unique: true`, and
+`UniqueTogetherValidator` for the model's `uniqueTogether`. Errors raised from `validate()` without
+a field key go under `nonFieldErrors` (configurable with `NON_FIELD_ERRORS_KEY`).
 
 ## JSON Schema
 
-Every serializer can describe itself:
+Every serializer can describe itself as JSON Schema (2020-12):
 
 ```ts
-new PostSerializer().jsonSchema()
+PostSerializer.jsonSchema()                                       // output schema
 // { type: 'object', properties: { title: { type: 'string', maxLength: 200 }, ... }, required: [...] }
+new PostSerializer().jsonSchema({ mode: 'input', partial: true })  // writable fields only, nothing required
 ```
 
 The [OpenAPI generator](/docs/topics/rest/openapi/) and the

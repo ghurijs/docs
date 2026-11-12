@@ -4,8 +4,8 @@ description: Create D1, R2 and KV resources, set secrets, run migrations against
 ---
 
 Cloudflare Workers is Ghuri's default home. A deployed project is a single Worker whose bindings
-give it a D1 database (`DB`), an R2 bucket for uploaded files (`MEDIA`) and a KV namespace for
-the cache (`CACHE`). This page walks through creating those resources, applying migrations to
+give it a D1 database (`DB`), an R2 bucket for uploaded files (`MEDIA`) and, optionally, a KV
+namespace for the cache (`CACHE`). This page walks through creating those resources, applying migrations to
 the remote database and shipping the Worker.
 
 The examples use the tutorial project `mysite` with its `blog` app.
@@ -28,20 +28,25 @@ server, and `ghuri deploy` replaces "push, collectstatic, restart gunicorn".
 - A project whose `wrangler.jsonc` has `"compatibility_flags": ["nodejs_compat"]` (the
   `create-ghuri` template does). Ghuri needs it for `AsyncLocalStorage`.
 
+The generated `wrangler.jsonc` already declares `DB` (with a placeholder `database_id` that only
+works locally), `MEDIA`, and a commented-out `CACHE`.
+
 ## 1. Create the resources
 
-Each command prints a snippet to paste into `wrangler.jsonc`. Keep the binding names the
+Each command prints an identifier or a snippet for `wrangler.jsonc`. Keep the binding names the
 settings expect: `DB`, `MEDIA` and `CACHE`.
 
 ### D1 database
 
 ```sh
-npx wrangler d1 create mysite
+npx wrangler d1 create mysite-db
 ```
+
+Replace the placeholder id in `wrangler.jsonc` with the one it prints:
 
 ```jsonc title="wrangler.jsonc"
 "d1_databases": [
-  { "binding": "DB", "database_name": "mysite", "database_id": "7c0e…" }
+  { "binding": "DB", "database_name": "mysite-db", "database_id": "7c0e…" }
 ]
 ```
 
@@ -65,14 +70,17 @@ the `r2.dev` URL for testing) in the dashboard and pass it to the storage config
 STORAGES: { default: r2('MEDIA', { publicUrl: 'https://media.example.com' }) },
 ```
 
-Without `publicUrl`, mount `serveMedia()` at `MEDIA_URL` and the Worker streams files from R2.
-See [File storage](/docs/topics/file-storage/).
+Without `publicUrl`, mount `mediaPatterns('media/')` (or `path('media/<path:name>', serveMedia())`)
+from `@ghuri/storage` in `src/urls.ts` and the Worker streams files from R2. See
+[File storage](/docs/topics/file-storage/) and [Storage backends](/docs/topics/storage-backends/).
 
-### KV namespace
+### KV namespace (optional)
 
 ```sh
 npx wrangler kv namespace create CACHE
 ```
+
+Uncomment `kv_namespaces` and paste the id:
 
 ```jsonc title="wrangler.jsonc"
 "kv_namespaces": [
@@ -80,7 +88,8 @@ npx wrangler kv namespace create CACHE
 ]
 ```
 
-KV is eventually consistent (writes can take up to a minute to appear in other locations).
+The generated settings use it automatically: `CACHES.default` is
+`env.CACHE ? kvCache('CACHE') : memoryCache()`. KV is eventually consistent (writes can take up to a minute to appear in other locations).
 That is fine for a cache. If you use `SESSION_ENGINE: 'kv'`, be aware that a session written
 in one region may briefly be missing in another; the default `db` engine does not have this
 problem.
@@ -108,9 +117,11 @@ Never deploy with `DEBUG` set to `"true"`. Debug error pages include stack trace
 
 ## 3. Apply migrations to the remote database
 
-Migrations are applied from your machine. The `--remote` flag tells the CLI to build `env` from
-the remote bindings in `wrangler.jsonc` (through Wrangler's `getPlatformProxy`) instead of the
-local simulator:
+Migrations are applied from your machine (or CI). The `--remote` flag tells the CLI to build
+`env` from the remote bindings in `wrangler.jsonc` instead of the local simulator: it writes a
+temporary copy of the config with every D1, R2 and KV binding marked `"remote": true` and calls
+Wrangler's `getPlatformProxy({ remoteBindings: true })`. It needs `wrangler login` and the real
+`database_id`:
 
 ```sh
 npx ghuri migrate --remote
@@ -124,9 +135,9 @@ npx ghuri createsuperuser --remote
 ```
 
 :::note[Alpha]
-`--remote` runs through Wrangler's remote bindings proxy. Its exact behaviour (and which
-commands support it) may change before 0.1.0 final. If it does not work in your setup, use the
-SQL-file workflow below.
+`--remote` is a global option, so every command supports it, but it runs through Wrangler's
+remote bindings proxy, which can be slow for large migrations. If it does not work in your
+setup, use the SQL-file workflow below.
 :::
 
 ### Alternative: Wrangler's own D1 migrations
@@ -135,24 +146,26 @@ If you prefer Wrangler to own schema changes (for example, because your CI alrea
 `wrangler d1 migrations apply`), export every Ghuri migration as SQLite SQL files:
 
 ```sh
-npx ghuri sqlmigrate --all --dialect sqlite --out migrations-sql/
+npx ghuri sqlmigrate --all --dialect sqlite --out migrations-sql
 ```
 
 Point Wrangler at that directory and apply:
 
 ```jsonc title="wrangler.jsonc"
 "d1_databases": [
-  { "binding": "DB", "database_name": "mysite", "database_id": "7c0e…", "migrations_dir": "migrations-sql" }
+  { "binding": "DB", "database_name": "mysite-db", "database_id": "7c0e…", "migrations_dir": "migrations-sql" }
 ]
 ```
 
 ```sh
-npx wrangler d1 migrations apply mysite --remote
+npx wrangler d1 migrations apply DB --remote
 ```
 
-Pick one workflow per database and stick with it. Ghuri records applied migrations in its own
-`ghuri_migrations` table and Wrangler records them in `d1_migrations`; neither knows about the
-other.
+Each generated file also inserts its row into Ghuri's `ghuri_migrations` table, so
+`ghuri showmigrations --remote` agrees with Wrangler, and re-running `sqlmigrate --all` only
+adds files for new migrations. Still, pick one workflow per database and stick with it:
+Wrangler records what it applied in its own `d1_migrations` table and does not know about
+migrations applied with `ghuri migrate`.
 
 ## 4. Deploy
 
@@ -160,15 +173,23 @@ other.
 npx ghuri deploy
 ```
 
-`ghuri deploy` runs `wrangler deploy` (arguments after `--` are passed through) and prints the
-`*.workers.dev` URL. `npm run deploy` is the same command.
+`ghuri deploy` first asks whether to apply migrations to the remote database
+(`ghuri migrate --remote`), then runs `wrangler deploy` and prints the `*.workers.dev` URL. Extra
+arguments are passed to Wrangler, and `--env <name>` selects a Wrangler environment for both
+steps. `npm run deploy` is the same command.
+
+| Option | Meaning |
+|---|---|
+| `--migrate` | Apply remote migrations first without asking; a failed migration aborts the deploy. |
+| `--skip-migrations` | Deploy without migrating (and without asking). |
+| `--dry-run` | `wrangler deploy --dry-run`; no migrations. |
+| `--no-input` | Never prompt (CI); migrations run only with `--migrate`. |
 
 A typical release is therefore:
 
 ```sh
 npx ghuri test
-npx ghuri migrate --remote
-npx ghuri deploy
+npx ghuri deploy --migrate
 ```
 
 Run `migrate` before `deploy` so new code never runs against an old schema. When you remove a
@@ -182,12 +203,18 @@ Attach a domain in `wrangler.jsonc`:
 "routes": [{ "pattern": "blog.example.com", "custom_domain": true }]
 ```
 
-Then tighten the host and CSRF settings, which default to permissive values:
+Then tighten the host and CSRF settings, which default to permissive values. The generated
+settings read `ALLOWED_HOSTS` from a comma-separated variable (`["*"]` when it is unset):
+
+```jsonc title="wrangler.jsonc"
+"vars": { "DEBUG": "false", "ALLOWED_HOSTS": "blog.example.com" }
+```
 
 ```ts title="src/settings.ts"
-ALLOWED_HOSTS: ['blog.example.com'],
 CSRF_TRUSTED_ORIGINS: ['https://blog.example.com'],
 ```
+
+`npx ghuri check --deploy` reports the usual production mistakes.
 
 ## Postgres on Workers with Hyperdrive
 
@@ -210,12 +237,9 @@ import { postgres } from '@ghuri/orm'
 DATABASES: { default: postgres({ hyperdrive: 'HYPERDRIVE' }) },
 ```
 
-For local development, give Wrangler a local connection string through
-`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` in `.dev.vars` or set
-`localConnectionString` on the binding.
-
-The CLI connects to Postgres directly, not through Hyperdrive, so set `DATABASE_URL` when you
-run migrations:
+A project created with `--db postgres` already has this shape: settings use Hyperdrive when the
+`HYPERDRIVE` binding exists and `DATABASE_URL` otherwise, and `wrangler.jsonc` contains the
+`hyperdrive` block commented out (uncomment it and paste the id):
 
 ```ts title="src/settings.ts"
 DATABASES: {
@@ -223,33 +247,62 @@ DATABASES: {
 },
 ```
 
+Locally, either leave the binding out and keep `DATABASE_URL` in `.dev.vars`, or give Wrangler a
+local connection string for it (`localConnectionString` on the binding, or
+`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE`). To run migrations against the
+production database, point `DATABASE_URL` at it:
+
 ```sh
 DATABASE_URL=postgres://user:password@db.example.com:5432/mysite npx ghuri migrate
 ```
 
 ## Scheduled and queue handlers
 
-`createApp()` returns an object with `fetch`, and also `scheduled` and `queue` handlers that
-Workers call for [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
-and [Queues](https://developers.cloudflare.com/queues/). Both run inside a Ghuri context, so the
-ORM, cache and storage work exactly as they do in a view.
+`createApp()` returns a Workers module handler with `fetch`, `scheduled` and `queue`, so
+`src/index.ts` (`export default createApp(settings)`) already receives
+[Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) and
+[Queues](https://developers.cloudflare.com/queues/) batches. Register handlers with `onSchedule`
+and `onQueue` from `@ghuri/core`, typically in an app's `ready()`. They run inside a Ghuri
+context, so the ORM, cache and storage work exactly as they do in a view.
 
-```jsonc title="wrangler.jsonc"
-"triggers": { "crons": ["0 3 * * *"] }
+```ts title="src/blog/app.ts"
+import { AppConfig, onQueue, onSchedule } from '@ghuri/core'
+
+export class BlogConfig extends AppConfig {
+  // ...name, path, models, migrations, admin
+  ready() {
+    // the exact cron expression from wrangler.jsonc, or '*' for every trigger
+    onSchedule('0 3 * * *', async () => {
+      await Post.objects.filter({ published: false, createdAt__lt: lastMonth() }).delete()
+    })
+    onQueue<{ postId: number }>('emails', async (batch) => {
+      for (const msg of batch.messages) {
+        await notifySubscribers(msg.body.postId)
+        msg.ack()
+      }
+    })
+  }
+}
 ```
 
-:::note[Alpha]
-The API for registering cron and queue handlers is not final in 0.1. A dedicated
-`@ghuri/tasks` package (Cloudflare Queues plus a Node worker) is on the roadmap. Until then,
-keep scheduled work small and call it from a [management command](/docs/topics/management-commands/)
-as well, so you can run it by hand.
-:::
+```jsonc title="wrangler.jsonc"
+"triggers": { "crons": ["0 3 * * *"] },
+"queues": {
+  "producers": [{ "binding": "EMAILS", "queue": "emails" }],
+  "consumers": [{ "queue": "emails" }]
+}
+```
+
+A batch for a queue with no registered handler fails with `ImproperlyConfigured`. These hooks
+only fire on Workers; on Node, call the same code from a
+[management command](/docs/topics/management-commands/) run by cron. See
+[Background tasks](/docs/topics/background-tasks/).
 
 ## Limits worth knowing
 
 | Concern | What to do |
 |---|---|
-| D1 has no interactive transactions | `atomic()` batches writes where it can; see [Transactions](/docs/topics/transactions/). |
+| D1 has no interactive transactions | `atomic()` on D1 has **no rollback**; use `connection.batch([...])` for all-or-nothing writes. See [Transactions](/docs/topics/transactions/). |
 | Worker CPU time limits | Keep heavy work (image processing, big exports) out of request handlers. |
 | D1 database size limits | When you approach them, [move to Postgres](/docs/deployment/d1-to-postgres/). |
 | No filesystem | Use `r2()` storage; `@ghuri/storage/fs` is Node only. |
