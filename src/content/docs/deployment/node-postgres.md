@@ -78,11 +78,18 @@ Notes on each adapter:
   backend is on the roadmap.
 
 :::caution
-Importing `@ghuri/storage/fs` or `@ghuri/orm/sqlite` pulls in Node-only modules. Do not import
-them from a settings file that is also bundled for Workers; keep a separate
-`settings.node.ts` or use a dynamic `import()` if you need both. A project created with
-`--db sqlite` is Node-only and already uses both (`sqlite({ filename })` and
-`fileSystemStorage({ location: 'media', baseUrl: '/media/' })`), with Postgres when
+`@ghuri/orm/sqlite` imports `better-sqlite3`, a native Node addon that cannot be bundled for
+Workers. Do not import it statically from a settings file that is also bundled for Workers; keep a
+separate `settings.node.ts`, or load it with a dynamic `import()` whose specifier is not a string
+literal, so the bundler leaves it out (`examples/blog` loads PGlite this way).
+
+`@ghuri/storage/fs` only imports `node:fs`, `node:path` and `node:stream`, which Workers provide
+under `nodejs_compat`, so a shared settings file can import it and choose the backend at runtime:
+`env.MEDIA ? r2('MEDIA') : fileSystemStorage({ ... })`, as `examples/blog` does. Only use it off
+Workers, whose filesystem is not persistent.
+
+A project created with `--db sqlite` is Node-only and already uses both (`sqlite({ filename })`
+and `fileSystemStorage({ location: 'media', baseUrl: '/media/' })`), with Postgres when
 `DATABASE_URL` is set.
 :::
 

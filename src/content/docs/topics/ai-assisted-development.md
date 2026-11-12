@@ -77,6 +77,7 @@ option.
 | `list_routes` | Every URL pattern with its name and view, like `ghuri routes` |
 | `list_commands` | Every management command, including those added by apps |
 | `show_migrations` | Applied and unapplied migrations per app |
+| `openapi_schema` | Your REST API's real OpenAPI document: a list of operations by default, or the JSON for a `path` prefix or `tag` |
 | `run_command` | Runs a management command (`makemigrations`, `migrate`, `test`, `check`, `startapp`, …) and returns its output |
 | `search_docs`, `get_doc` | Search and read this documentation (from `llms-full.txt`) |
 

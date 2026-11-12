@@ -264,7 +264,7 @@ every model, and active superusers pass every check:
 | Hook | Default |
 |---|---|
 | `hasViewPermission(c, obj?)` | `blog.view_post` or `blog.change_post` |
-| `hasAddPermission(c)` | `blog.add_post` |
+| `hasAddPermission(c, obj?)` | `blog.add_post` |
 | `hasChangePermission(c, obj?)` | `blog.change_post` |
 | `hasDeletePermission(c, obj?)` | `blog.delete_post` |
 | `hasModulePermission(c)` | `user.hasModulePerms('blog')` |

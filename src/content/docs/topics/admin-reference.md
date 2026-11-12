@@ -334,7 +334,8 @@ Inlines also take the form options (`fields`, `exclude`, `fieldsets`, `readonlyF
 `rawIdFields`, `autocompleteFields`, `formfieldOverrides`, ...) and the hooks `getExtra(c, obj)`,
 `getMinNum(c, obj)` and `getMaxNum(c, obj)`. Permission hooks default to the inline model's
 permissions; for auto-created many-to-many through models they use the parent's `change` (and
-`view`) permission.
+`view`) permission. On an inline, `hasAddPermission(c, obj)` receives the parent object being
+edited (undefined on the parent's add page).
 
 Without JavaScript the `extra` rows are shown; with it an "Add another ..." link clones rows. Form
 fields are named like Django's formsets (`comments-0-text`, `comments-TOTAL_FORMS`, ...); the
@@ -370,7 +371,7 @@ Override these like Django's methods:
 | Hook | Default |
 |---|---|
 | `hasViewPermission(c, obj?)` | `app.view_model` or `app.change_model` |
-| `hasAddPermission(c)` | `app.add_model` |
+| `hasAddPermission(c, obj?)` | `app.add_model` |
 | `hasChangePermission(c, obj?)` | `app.change_model` |
 | `hasDeletePermission(c, obj?)` | `app.delete_model` |
 | `hasModulePermission(c)` | `user.hasModulePerms(appLabel)` |

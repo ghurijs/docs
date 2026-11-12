@@ -122,8 +122,10 @@ a collapsible fieldset, and comments are edited inline at the bottom.
 :::tip[If you know Django]
 `ModelAdmin` options use the same names in camelCase: `list_display` → `listDisplay`,
 `search_fields` → `searchFields`, `prepopulated_fields` → `prepopulatedFields`, and so on.
-`@admin.register(Post)` is the decorator you know (a standard TC39 decorator, so no
-`experimentalDecorators` flag). `action({ description, permissions }, fn)` is
+`@admin.register(Post)` is the decorator you know. It works as a standard TC39 decorator (what
+wrangler and esbuild emit, so the build needs no `experimentalDecorators` flag) and as a legacy
+one: Vitest transpiles with oxc, which only lowers legacy decorators so far, so the generated
+`vitest.config.ts` sets `oxc: { decorator: { legacy: true } }` for `ghuri test`. `action({ description, permissions }, fn)` is
 `@admin.action(description=..., permissions=[...])`, and actions receive `(modelAdmin, c, queryset)`
 where Django passes `(modeladmin, request, queryset)`.
 :::

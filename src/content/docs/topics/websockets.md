@@ -36,6 +36,7 @@ Then pick a layer, the place rooms live, in `src/settings.ts`. On Cloudflare tha
 Object; on Node and in tests it is memory:
 
 ```ts title="src/settings.ts"
+import { defineSettings } from '@ghuri/core'
 import { durableObjectLayer } from '@ghuri/realtime/cloudflare'
 
 export default defineSettings((env) => ({
@@ -246,6 +247,9 @@ postSave.connect(
 hand the promise to `waitUntil`:
 
 ```ts
+import { getContext } from '@ghuri/core'
+import { channelLayer } from '@ghuri/realtime'
+
 getContext().executionCtx?.waitUntil(channelLayer.groupSend(`user.${pk}`, { type: 'notify', text }))
 ```
 
@@ -265,7 +269,8 @@ After the middleware, in order:
 2. **`static authenticationClasses`**: the same classes as the REST framework, e.g.
    `TokenAuthentication` or `JWTAuthentication` from `@ghuri/auth/rest`. Invalid credentials get 401.
 3. **`static permissionClasses`**: REST permission classes such as `IsAuthenticated`; they see
-   `request.user` and `request.auth`. Denied: 401 for anonymous users, 403 otherwise.
+   `request.user`, `request.auth` and `request.scope` (URL kwargs in `scope.params`; `scope.room`
+   is not resolved yet). Denied: 401 for anonymous users, 403 otherwise.
 4. **`static room`**: `null` gets 403.
 
 ### Tokens from browsers
@@ -280,6 +285,8 @@ const ws = new WebSocket(url, ['ghuri', `bearer.${accessToken}`])
 
 ```ts
 import { JWTAuthentication } from '@ghuri/auth/rest'
+import { JsonWebSocketConsumer, type Scope } from '@ghuri/realtime'
+import { IsAuthenticated } from '@ghuri/rest'
 
 export class NotificationsConsumer extends JsonWebSocketConsumer {
   static authenticationClasses = [JWTAuthentication]
@@ -384,6 +391,8 @@ a network. Use `memoryLayer()` in test settings:
 
 ```ts title="src/chat/tests/consumers.test.ts"
 import { WebSocketCommunicator } from '@ghuri/realtime/testing'
+import { expect, it } from 'vitest'
+// app: createApp(settings); env: the test env; annUser / bobUser: users created in beforeEach
 
 it('broadcasts messages to the room', async () => {
   const ann = new WebSocketCommunicator(app, '/ws/chat/lobby/', { user: annUser, env })

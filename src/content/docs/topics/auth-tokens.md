@@ -73,7 +73,9 @@ curl -X POST https://example.com/api/auth/token/ \
 # {"token":"9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"}
 ```
 
-Wrong credentials answer `400` with `{"non_field_errors": ["Unable to log in with provided credentials."]}`.
+Wrong credentials answer `400` with `{"nonFieldErrors": ["Unable to log in with provided credentials."]}`.
+The key follows `REST_FRAMEWORK.NON_FIELD_ERRORS_KEY` (set it to `'non_field_errors'` for
+DRF-compatible clients).
 
 ### Using a token
 

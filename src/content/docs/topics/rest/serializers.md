@@ -220,13 +220,14 @@ All fields accept `readOnly`, `writeOnly`, `required`, `default`, `allowNull`, `
 | Field | Notes |
 |---|---|
 | `CharField` | `maxLength`, `minLength`, `allowBlank`, `trimWhitespace` (default `true`) |
-| `EmailField`, `URLField`, `UUIDField`, `SlugField`, `IPAddressField`, `RegexField` | Validated strings |
+| `EmailField`, `URLField`, `UUIDField`, `SlugField`, `IPAddressField` | Validated strings |
+| `RegexField` | `new RegexField(/^[A-Z]{3}$/, opts?)`: the pattern (a `RegExp` or string) is the first argument |
 | `IntegerField`, `FloatField` | `minValue`, `maxValue` |
 | `DecimalField` | `maxDigits`, `decimalPlaces`; values are strings, as in the ORM |
 | `BooleanField`, `NullBooleanField` | Accepts `true`/`false`, `"true"`, `"1"`, `"on"` … |
 | `DateTimeField`, `DateField`, `TimeField` | ISO 8601 in and out |
 | `DurationField` | Milliseconds (the ORM's representation); output uses DRF's `[DD ]HH:MM:SS[.uuuuuu]` |
-| `ChoiceField`, `MultipleChoiceField` | `choices` as `[value, label][]` |
+| `ChoiceField`, `MultipleChoiceField` | `new ChoiceField(choices, opts?)`: `choices` is the first argument (`[value, label][]`, a list of values, a `{ value: label }` object or a `Map`), not an option; `allowBlank`, and `allowEmpty` on `MultipleChoiceField` |
 | `ListField`, `DictField` | `child` field for elements |
 | `JSONField` | Any JSON value |
 | `FileField`, `ImageField` | Multipart uploads; see [File storage](/docs/topics/file-storage/) |

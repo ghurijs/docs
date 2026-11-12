@@ -103,7 +103,7 @@ import { PostSerializer } from './serializers'
 export async function popular(c: Context) {
   const data = await cache.getOrSet('blog:popular:v1', async () => {
     const posts = await Post.objects.filter({ published: true }).orderBy('-createdAt').slice(0, 10)
-    return new PostSerializer(posts, { many: true }).getData()
+    return new PostSerializer({ instance: posts, many: true }).getData()
   }, 300)
   return json(c, data)
 }

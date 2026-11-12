@@ -192,10 +192,10 @@ export const urlpatterns = [path('accounts/', include(authUrls))]
 
 | URL | Name | |
 |---|---|---|
-| `login/` | `login` | `POST {username, password}` as JSON or a form. JSON answers `{ user }`; forms redirect to a safe `next` or `LOGIN_REDIRECT_URL`. `GET` returns `{ csrfToken }` or a minimal HTML form |
+| `login/` | `login` | `POST {username, password}` as JSON or a form. JSON answers `{ user }`; forms redirect to a safe `next` or `LOGIN_REDIRECT_URL`. `GET` returns `{ isAuthenticated, csrfToken, user? }` (`user` only when logged in) or a minimal HTML form |
 | `logout/` | `logout` | `POST` only |
 | `password_change/` | `password_change` | `POST {oldPassword, newPassword1, newPassword2}`, login required |
-| `password_reset/` | `password_reset` | `POST {email}`, then calls `sendResetEmail(c, { user, uid, token, url })` |
+| `password_reset/` | `password_reset` | `POST {email}`, then calls `sendResetEmail(c, { user, email, uid, token, url })` |
 | `reset/<uidb64>/<token>/` | `password_reset_confirm` | `GET` checks the link, `POST {newPassword1, newPassword2}` sets the password |
 | `me/` | `whoami` | The current user |
 

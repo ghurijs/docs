@@ -164,12 +164,12 @@ Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`
 | `actions` | Subset of `'list' \| 'retrieve' \| 'create' \| 'update' \| 'delete'`. Default: `['list', 'retrieve']` |
 | `serializer` | Serializer for input validation and output. Default: a `ModelSerializer` with all fields |
 | `filter` | `(qs, user) => QuerySet`; scopes every action, including retrieve, update and delete |
-| `saveKwargs` | `(user) => values` forced on create and update |
+| `saveKwargs` | `(user, action) => values` forced on create and update; `action` is `'create'` or `'update'`. May be async |
 | `permissionClasses` | Default: `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` |
 | `searchFields` | Adds a `search` argument to the list tool |
 | `orderingFields`, `ordering` | Adds an `ordering` argument, and the default order |
 | `filterFields` | Exact-match filter arguments on the list tool |
-| `pageSize`, `maxPageSize` | Rows per page (default 20) and the most the model may request (default 100). Keep them small: every row costs tokens |
+| `pageSize`, `maxPageSize` | Rows per page (default 20) and the most the model may request (default `Math.max(100, pageSize)`). Keep them small: every row costs tokens |
 | `prefix`, `descriptions` | Tool name prefix, and per-action descriptions |
 
 Default to read-only tools and add write actions deliberately. Anything the tool can do, a

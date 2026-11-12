@@ -41,7 +41,10 @@ npm install @ghuri/graphql@next graphql
 ```
 
 ```ts title="src/settings.ts"
+import { JWTAuthentication, SessionAuthentication, TokenAuthentication } from '@ghuri/auth/rest'
+import { defineSettings } from '@ghuri/core'
 import { GraphQLConfig } from '@ghuri/graphql'
+import { BlogConfig } from './blog/app'
 import { schema } from './schema'
 
 export default defineSettings((env) => ({
@@ -55,6 +58,7 @@ export default defineSettings((env) => ({
 ```
 
 ```ts title="src/urls.ts"
+import { path } from '@ghuri/core'
 import { GraphQLView } from '@ghuri/graphql'
 
 export const urlpatterns = [
@@ -84,7 +88,7 @@ Each app created with `ghuri startapp` has a commented `schema.ts` to start from
 ## Types from models
 
 ```ts title="src/blog/schema.ts"
-import { Field, ModelType, Node, String as GString } from '@ghuri/graphql'
+import { Field, ModelType, Node, type ResolveInfo, String as GString } from '@ghuri/graphql'
 import type { QuerySet } from '@ghuri/orm'
 import { Comment, Post, Tag } from './models'
 
@@ -112,7 +116,7 @@ export class PostType extends ModelType {
   }
 
   // row-level scoping, applied wherever PostType objects are fetched
-  static getQueryset(qs: QuerySet<Post>, info) {
+  static getQueryset(qs: QuerySet<Post>, info: ResolveInfo) {
     const user = info.context.user
     if (user.isStaff) return qs
     return qs.filter({ published: true })
@@ -152,15 +156,17 @@ Plain graphene-style types are there too: `ObjectType`, `InputObjectType`, `Inte
 
 ## Queries
 
-```ts
-import { ConnectionField, Field, ID, List, NonNull, Node, Query } from '@ghuri/graphql'
+```ts title="src/blog/schema.ts (continued)"
+import { ConnectionField, Field, List, NonNull, Node, Query, String as GString } from '@ghuri/graphql'
+import { Post } from './models'
+// PostType: defined above
 
 export class BlogQuery extends Query {
   static fields = {
     posts: List(PostType),                       // root lists default to Model.objects.all()
     post: Field(PostType, {
       args: { slug: NonNull(GString) },
-      resolve: (_root, { slug }) => Post.objects.get({ slug }),
+      resolve: (_root: unknown, { slug }: { slug: string }) => Post.objects.get({ slug }),
     }),
     allPosts: ConnectionField(PostType),         // Relay connection with filter / orderBy
     node: Node.Field(),                          // node(id: ID!): Node
@@ -230,9 +236,10 @@ short, composes with `and` / `or` / `not` and is easy to build from variables.
 The recommended way: your `ModelSerializer` validates the input, runs `create()` / `update()`
 and its field validators, and permission classes decide who may do it.
 
-```ts
-import { ModelMutation, Mutation, SerializerMutation } from '@ghuri/graphql'
+```ts title="src/blog/schema.ts (continued)"
+import { ModelMutation, Mutation, type ResolveInfo, SerializerMutation } from '@ghuri/graphql'
 import { IsAuthenticated } from '@ghuri/rest'
+import { Post } from './models'
 import { IsAuthorOrReadOnly } from './permissions'
 import { PostSerializer } from './serializers'
 
@@ -243,7 +250,7 @@ export class CreatePost extends SerializerMutation {
     permissionClasses: [IsAuthenticated],
   }
   // like PostViewSet.performCreate()
-  static async performMutate(serializer: PostSerializer, info) {
+  static async performMutate(serializer: PostSerializer, info: ResolveInfo) {
     await serializer.save({ author: info.context.user })
     return { ...(await serializer.getData()), errors: [] }
   }
@@ -292,10 +299,14 @@ create / update and `{ ok, deletedId, errors, clientMutationId }` for delete.
 ### Plain mutations
 
 ```ts
+import { Boolean as GBoolean, Field, ID, loginRequired, Mutation, NonNull } from '@ghuri/graphql'
+import { Post } from './models'
+// PostType: defined above
+
 class PublishPost extends Mutation {
   static Arguments = { id: NonNull(ID) }
-  static fields = { post: Field(PostType), ok: Boolean }
-  static mutate = loginRequired(async (_root, { id }, info) => {
+  static fields = { post: Field(PostType), ok: GBoolean }
+  static mutate = loginRequired(async (_root: unknown, { id }: { id: string }) => {
     const post = await Post.objects.get({ id })
     post.published = true
     await post.save()
@@ -398,8 +409,9 @@ See the [CLI reference](/docs/reference/cli/#graphql_schema-graphqlconfig).
 ## Testing
 
 ```ts title="src/blog/tests.ts"
-import { toGlobalId } from '@ghuri/graphql'
 import { assertResponseHasErrors, assertResponseNoErrors, graphqlQuery, payloadErrors } from '@ghuri/graphql/testing'
+import { expect, it } from 'vitest'
+// client: a test client for the app (createTestClient); token: a Token key for a user
 
 it('filters posts', async () => {
   const res = await graphqlQuery(client, '{ allPosts(filter: { title: { icontains: "d1" } }) { edges { node { slug } } } }')

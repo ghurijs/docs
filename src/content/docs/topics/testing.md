@@ -106,7 +106,9 @@ GHURI_TEST_BACKENDS=sqlite,pglite npx ghuri test
 ```
 
 PGlite needs no Postgres server, so this works on any CI runner. `captureQueries(fn)` from
-`@ghuri/orm` returns the SQL a block executed, for asserting query counts.
+`@ghuri/orm` runs `fn` and returns a `[result, queries]` tuple, where `queries` is the list of
+`QueryEvent`s (`sql`, `params`, `alias`, `vendor`, `durationMs`) the block executed, for
+asserting query counts: `const [posts, queries] = await captureQueries(() => Post.objects.all())`.
 
 ## The test client
 

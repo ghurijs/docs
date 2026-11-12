@@ -248,6 +248,7 @@ VS Code uses `.vscode/mcp.json` with a `servers` key:
 | `list_apps` | Installed apps with their models, commands and migrations |
 | `list_models` / `describe_model` | Models, fields and options, relations, reverse relations, Meta and managers |
 | `list_routes` | URL patterns, like `routes` |
+| `openapi_schema` | The REST API as OpenAPI 3.1, like [`generateschema`](#generateschema-restframeworkconfig): one line per operation by default; with `path` (a prefix such as `/api/posts/`) or `tag`, or `summary: false`, the JSON of those operations and the components they reference |
 | `list_commands` | Every command, like `help` |
 | `show_migrations` | Applied and unapplied migrations on the local database |
 | `run_command` | Runs a command (`check`, `makemigrations`, `migrate`, `test`, `startapp`, app commands, …) and returns the exit code and output |
