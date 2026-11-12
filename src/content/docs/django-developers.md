@@ -179,6 +179,8 @@ export class Post extends Model({
 | `@login_required` | `loginRequired(view)` |
 | `@permission_required('blog.add_post')` | `permissionRequired('blog.add_post')(view)` |
 | `@csrf_exempt` | `csrfExempt(view)` |
+| `@xframe_options_exempt` | `xframeOptionsExempt(view)` |
+| `request.META['REMOTE_ADDR']` | `getRemoteAddr(c)` |
 
 ## Middleware
 
@@ -395,6 +397,10 @@ Other differences:
   `post`.
 - **`inBulk()` returns a `Map`** and **`delete()` returns `[total, perModel]`**.
 - **Serializers are async**: `await serializer.isValid()`, `await serializer.getData()`.
+- **Throttles do not trust `X-Forwarded-For` by default.** DRF uses the whole header when
+  `NUM_PROXIES` is `None`; Ghuri ignores it unless `NUM_PROXIES` is set and identifies clients by
+  `CF-Connecting-IP` on Cloudflare or the socket address on Node. See
+  [throttling](/docs/topics/rest/throttling/#client-ip-addresses).
 - **Table names follow Django** (`auth_user`, `django_session`, `django_admin_log`), and
   password hashes and signed cookies are byte-compatible, so an existing Django database can be
   shared or migrated.

@@ -72,9 +72,19 @@ action only: `@action({ detail: true, methods: ['post'], throttleScope: 'uploads
 
 ## Client IP addresses
 
-On Cloudflare the client IP comes from the `CF-Connecting-IP` header, which Cloudflare sets and
-clients cannot forge. On Node behind a reverse proxy, tell Ghuri how many proxies to trust so it
-reads the right entry from `X-Forwarded-For`:
+Anonymous clients are identified by IP address (`getIdent()`), and only sources a client cannot
+forge are trusted by default:
+
+- **On Cloudflare** (Workers, and `wrangler dev`), the `CF-Connecting-IP` header. Cloudflare sets
+  it and overwrites any value the client sent.
+- **On Node**, the socket address. `serve()` from `@ghuri/core/node` records it, and so does
+  plain `@hono/node-server` (`c.env.incoming`). A custom server can call
+  `setRemoteAddr(request, addr)` before `app.fetch()`.
+- `X-Forwarded-For` (and `X-Real-IP`) are **ignored**, because any client can send them.
+
+Behind a reverse proxy (nginx, a load balancer, Cloudflare in front of a Node server), the socket
+address is the proxy's, so all clients would share one bucket. Tell Ghuri how many proxies to
+trust so it reads the right entry from `X-Forwarded-For`:
 
 ```ts
 REST_FRAMEWORK: {
@@ -82,10 +92,13 @@ REST_FRAMEWORK: {
 }
 ```
 
-Without `NUM_PROXIES`, the whole `X-Forwarded-For` value is used as the identity when the header
-is present (as in DRF), which a client can vary at will; when it is absent, `CF-Connecting-IP` or
-the socket address is used. Behind a proxy, set `NUM_PROXIES` so all users do not share the
-proxy's bucket and clients cannot pick their own.
+With `NUM_PROXIES: n` the client is the address `n` entries from the end of `X-Forwarded-For`
+(DRF's rule); `0` ignores the header. Set it to exactly the number of proxies that append to the
+header: a larger value lets clients pick their own identity again.
+
+The address without proxies is core's `getRemoteAddr(c)` (Django's `REMOTE_ADDR`), which you can
+also use in your own views, for example for login lockouts or audit logs. To read it from
+somewhere else, override `getRemoteAddr(request)` in a throttle subclass.
 
 ## Accuracy on Workers
 
