@@ -11,7 +11,7 @@ export default defineConfig({
       title: 'Ghuri',
       description:
         'Django for TypeScript. Start on Cloudflare Workers with D1 and R2, move to Postgres on any VPS by changing settings.',
-      logo: { src: './src/assets/logo.svg', alt: 'Ghuri' },
+      logo: { light: './src/assets/logo-light.svg', dark: './src/assets/logo-dark.svg', alt: 'Ghuri', replacesTitle: true },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/ghurijs' }],
       editLink: { baseUrl: 'https://github.com/ghurijs/docs/edit/main/' },
