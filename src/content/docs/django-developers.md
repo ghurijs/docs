@@ -307,6 +307,19 @@ copied from Django keeps working.
 See [Social login](/docs/topics/social-login/). For custom flows (your own IdP, magic links, API keys) see
 [Login strategies](/docs/topics/login-strategies/).
 
+## OAuth provider (django-oauth-toolkit)
+
+| django-oauth-toolkit | Ghuri (`@ghuri/oauth-provider`) |
+|---|---|
+| `'oauth2_provider'` in `INSTALLED_APPS` | `OAuth2ProviderConfig` (app label `oauth2_provider`, tables `oauth2_provider_*`) |
+| `path('o/', include('oauth2_provider.urls'))` | `path('oauth/', include(oauth2ProviderUrls))` plus `oauth2WellKnownUrls` at the root |
+| `OAUTH2_PROVIDER = {'SCOPES': {...}, 'ACCESS_TOKEN_EXPIRE_SECONDS': ...}` | `OAUTH2_PROVIDER: { SCOPES: {...}, ACCESS_TOKEN_EXPIRE_SECONDS: ... }` |
+| `Application`, `RefreshToken`, `skip_authorization` | `Application`, `RefreshToken`, `skipAuthorization` |
+| `OAuth2Authentication`, `TokenHasScope`, `required_scopes` | `OAuth2Authentication`, `TokenHasScope`, `requiredScopes` (`@ghuri/oauth-provider/rest`) |
+| `manage.py cleartokens` | `ghuri cleartokens` |
+
+See [MCP server with OAuth](/docs/topics/mcp-oauth/).
+
 ## Email
 
 | Django | Ghuri (`@ghuri/mail`) |
@@ -387,8 +400,26 @@ customise through `ModelAdmin` options, hooks, CSS and custom views. See the
 
 :::note[MCP]
 The MCP server in `@ghuri/agents` authenticates with your REST authentication classes (for
-example `Authorization: Token <key>`). There is **no OAuth** authorization flow; clients send a
-token header. See [AI agents and MCP](/docs/topics/agents-mcp/).
+example `Authorization: Token <key>`), or, in OAuth mode, with access tokens from
+`@ghuri/oauth-provider`. See [AI agents and MCP](/docs/topics/agents-mcp/) and
+[MCP server with OAuth](/docs/topics/mcp-oauth/).
+:::
+
+:::note[OAuth provider]
+`@ghuri/oauth-provider` follows django-oauth-toolkit's names and tables, with these differences:
+
+- **`Grant` means something else.** In django-oauth-toolkit, `Grant` is the authorization code. Here
+  `AuthorizationCode` is the code, and `Grant` is the user's consent for a client (scopes,
+  resource and app-defined `props`). Every refresh token belongs to a grant, and revoking the grant
+  ends all of them.
+- **Access tokens are not stored.** They are signed JWTs (RFC 9068) bound to a resource
+  (`aud`), so there is no `AccessToken` model. Codes, refresh tokens and client secrets are
+  stored as SHA-256 hashes.
+- **OAuth 2.1 only.** The authorization code grant always requires PKCE `S256`, and refresh tokens
+  always rotate, with reuse detection. There are no implicit, password, client-credentials or
+  OpenID Connect flows.
+- **Clients can register themselves**, through Client ID Metadata Documents and RFC 7591 dynamic
+  registration, as MCP clients need.
 :::
 
 Other differences:

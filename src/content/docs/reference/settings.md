@@ -366,6 +366,32 @@ See [Multi-tenancy](/docs/topics/multi-tenancy/).
 | `HTTP_TIMEOUT` | `number` (ms) | `10000` | Timeout of requests to providers. |
 | `CALLBACK_BASE_URL` | `string` | the request origin | Origin used for callback URLs (set it behind proxies that rewrite the host). |
 
+## OAuth provider (`@ghuri/oauth-provider`)
+
+| Key (`OAUTH2_PROVIDER.*`) | Type | Default | Description |
+|---|---|---|---|
+| `ISSUER` | `string` | the request origin | Issuer identifier of the authorization server. |
+| `SCOPES` | `Record<string, string>` | unset (any scope) | Scopes and the descriptions shown on the consent page. |
+| `DEFAULT_SCOPES` | `string[]` | every key of `SCOPES` | Scopes for requests that name none. |
+| `ACCESS_TOKEN_EXPIRE_SECONDS` | `number` | `3600` | Access token lifetime. |
+| `REFRESH_TOKEN_EXPIRE_SECONDS` | `number` | `2592000` | Refresh token lifetime (renewed by each rotation). |
+| `AUTHORIZATION_CODE_EXPIRE_SECONDS` | `number` | `60` | Authorization code lifetime. |
+| `REFRESH_TOKEN_GRACE_PERIOD_SECONDS` | `number` | `0` | Retry window for a just-rotated refresh token. |
+| `RESOURCES` | `string[] \| (resource, c) => boolean` | the issuer's origin | Resource indicators tokens may be issued for. |
+| `DEFAULT_RESOURCE` / `REQUIRE_RESOURCE` | `string` / `boolean` | issuer / `false` | Audience without `resource`, or refuse such requests. |
+| `REQUEST_APPROVAL_PROMPT` | `'auto' \| 'force'` | `'auto'` | Skip consent for scopes the user already granted. |
+| `CONSENT_HANDLER` | `ConsentHandler` | built-in page | Your consent step. |
+| `ALLOW_DYNAMIC_REGISTRATION` / `REGISTRATION_RATE` | `boolean` / `string \| null` | `true` / `'20/hour'` | RFC 7591 registration and its per-IP limit. |
+| `ALLOW_CLIENT_ID_METADATA_DOCUMENTS` | `boolean` | `true` | Accept URL client IDs (CIMD). |
+| `CLIENT_METADATA_ALLOWED_HOSTS` / `CLIENT_METADATA_POLICY` | `string[]` / function | any public host / none | Restrict metadata documents. |
+| `CLIENT_METADATA_CACHE_{MIN,DEFAULT,MAX}_SECONDS` | `number` | `300` / `3600` / `86400` | Metadata document cache bounds. |
+| `CLIENT_METADATA_TIMEOUT` / `CLIENT_METADATA_MAX_BYTES` | `number` | `5000` / `5120` | Fetch limits. |
+| `ALLOWED_REDIRECT_URI_SCHEMES` | `string[]` | `[]` | Custom schemes for native apps. |
+| `ACCESS_TOKEN_ALGORITHM` / `ACCESS_TOKEN_SIGNING_KEY` | string / JWK | `'HS256'` / none | Access token signing. |
+| `CHECK_GRANT_ON_ACCESS` | `boolean` | `true` | Refuse tokens of revoked grants. |
+
+See [MCP server with OAuth](/docs/topics/mcp-oauth/).
+
 ## Reading settings in your code
 
 ```ts

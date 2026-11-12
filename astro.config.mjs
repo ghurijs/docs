@@ -100,7 +100,7 @@ export default defineConfig({
             {
               label: 'Agents',
               description: 'AI agents built from models, viewsets and permissions, and exposing them over MCP',
-              paths: ['topics/agents', 'topics/agents-mcp'],
+              paths: ['topics/agents', 'topics/agents-mcp', 'topics/mcp-oauth'],
             },
             {
               label: 'Deployment',
@@ -184,7 +184,7 @@ export default defineConfig({
             { slug: 'topics/testing' },
             {
               label: 'AI agents',
-              items: [{ slug: 'topics/agents' }, { slug: 'topics/agents-mcp' }],
+              items: [{ slug: 'topics/agents' }, { slug: 'topics/agents-mcp' }, { slug: 'topics/mcp-oauth' }],
             },
           ],
         },
