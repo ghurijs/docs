@@ -177,7 +177,7 @@ exports a `DefaultRouter` mounted at `api/`. Register the viewsets there:
 ```ts title="src/urls.ts" ins={5,10-11}
 import { admin } from '@ghuri/admin'
 import { include, path } from '@ghuri/core'
-import { DefaultRouter } from '@ghuri/rest'
+import { DefaultRouter, ScalarView, SchemaView, SwaggerUIView } from '@ghuri/rest'
 import type { Context } from 'hono'
 import { PostViewSet, TagViewSet } from './blog/views'
 import { urlpatterns as blogUrls } from './blog/urls'
@@ -188,12 +188,15 @@ router.register('posts', PostViewSet)
 router.register('tags', TagViewSet)
 
 function home(c: Context) {
-  return c.json({ project: 'mysite', admin: '/admin/', api: '/api/' })
+  return c.json({ project: 'mysite', admin: '/admin/', api: '/api/', docs: '/api/docs/' })
 }
 
 export const urlpatterns = [
   path('', home, { name: 'home' }),
   path('admin/', admin.site.urls),
+  path('api/schema/', SchemaView.asView({ title: 'mysite API', version: '0.1.0' }), { name: 'schema' }),
+  path('api/docs/', SwaggerUIView.asView({ urlName: 'schema' }), { name: 'swagger-ui' }),
+  path('api/reference/', ScalarView.asView({ urlName: 'schema' }), { name: 'scalar' }),
   path('api/', include(router.urls)),
   path('blog/', include(blogUrls)),
 ]
@@ -245,13 +248,14 @@ works for them (and enforces CSRF on unsafe methods). Other clients send a token
 `authtoken` app (`AuthTokenConfig`, already in `INSTALLED_APPS`). Add an endpoint that exchanges
 a username and password for a token:
 
-```ts title="src/urls.ts" ins={1,8}
+```ts title="src/urls.ts" ins={1,9}
 import { obtainAuthToken } from '@ghuri/auth/rest'
 // ...
 
 export const urlpatterns = [
   path('', home, { name: 'home' }),
   path('admin/', admin.site.urls),
+  // ...the three schema / docs routes
   path('api/', include(router.urls)),
   path('api-token-auth/', obtainAuthToken),
   path('blog/', include(blogUrls)),
@@ -281,20 +285,19 @@ line with `npx ghuri drf_create_token rifat`. If you prefer JWTs, use `JWTAuthen
 
 ## OpenAPI docs
 
-Add a schema and interactive docs in two lines:
+The project came with an OpenAPI 3.1 schema and interactive docs; they are the three
+`api/schema/`, `api/docs/` and `api/reference/` routes in `src/urls.ts`. Open
+`http://localhost:8787/api/docs/` for Swagger UI or `http://localhost:8787/api/reference/` for
+Scalar, and try every endpoint from the browser. The raw document is at `/api/schema/`. It is
+built from your views and serializers, so it stays in sync with the code.
 
-```ts title="src/urls.ts"
-import { DefaultRouter, ScalarView, SchemaView } from '@ghuri/rest'
+To write it to a file, for a client generator or to commit it:
 
-// inside urlpatterns, before path('api/', include(router.urls)):
-path('api/schema/', SchemaView.asView({ title: 'Blog API', version: '1.0.0' }), { name: 'openapi-schema' }),
-path('api/docs/', ScalarView.asView({ urlName: 'openapi-schema' })),
+```sh
+npx ghuri generateschema --file openapi.yaml
 ```
 
-Open `http://localhost:8787/api/docs/` to browse and try every endpoint (`SwaggerUIView` is
-there too if you prefer Swagger UI). The schema is built
-from your serializers, so it stays in sync with the code. See
-[OpenAPI](/docs/topics/rest/openapi/).
+See [OpenAPI](/docs/topics/rest/openapi/) to rename operations, add tags or hide views.
 
 ## Testing the API
 

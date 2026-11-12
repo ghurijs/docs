@@ -27,7 +27,7 @@ and `migrate` created the tables for the built-in apps (content types, users, se
 and the admin log) in a local D1 database.
 
 Visit `http://localhost:8787/`. You should see
-`{"project":"mysite","admin":"/admin/","api":"/api/"}`, which comes from the home view in
+`{"project":"mysite","admin":"/admin/","api":"/api/","docs":"/api/docs/"}`, which comes from the home view in
 `src/urls.ts`. Leave the server running; it reloads when you save files.
 
 :::tip[If you know Django]
@@ -73,7 +73,7 @@ admin classes. `path` is only used by the CLI, to know where to write migration 
 `startapp` also installed the app for you: it added the import and the list entry to
 `src/settings.ts`.
 
-```ts title="src/settings.ts" ins={4,14}
+```ts title="src/settings.ts" ins={4,15}
 // ...
 import { r2 } from '@ghuri/storage'
 import { urlpatterns } from './urls'
@@ -87,6 +87,7 @@ export default defineSettings((env) => ({
     SessionsConfig,
     AuthTokenConfig,
     AdminConfig,
+    RestFrameworkConfig,
     BlogConfig,
   ],
   // ...the rest is unchanged

@@ -23,12 +23,15 @@ import { SchemaView, SwaggerUIView, ScalarView } from '@ghuri/rest'
 import { router } from './api/urls'
 
 export const urlpatterns = [
-  path('api/', include(router.urls)),
   path('api/schema/', SchemaView.asView({ title: 'Blog API', version: '1.0.0' }), { name: 'schema' }),
   path('api/docs/', SwaggerUIView.asView({ urlName: 'schema' }), { name: 'swagger-ui' }),
   path('api/reference/', ScalarView.asView({ urlName: 'schema' }), { name: 'scalar' }),
+  path('api/', include(router.urls)),
 ]
 ```
+
+Projects created with `ghuri startproject` already have these three routes. They come before the
+router's `include()` so that a viewset registered as `schema` or `docs` can't shadow them.
 
 - `GET /api/schema/` returns the schema as JSON (also as `application/vnd.oai.openapi+json`).
   The document is generated once and cached per URL conf; pass `cacheSchema: false` to rebuild
@@ -42,7 +45,8 @@ export const urlpatterns = [
 find the schema by `urlName` (reversed in the current namespace), or take a literal `schemaUrl`.
 
 :::note
-The schema is served as JSON only; there is no YAML renderer.
+`SchemaView` serves JSON only; there is no YAML renderer. `ghuri generateschema` (below) writes
+YAML or JSON files.
 :::
 
 Neither UI adds a build step or bundles assets into your Worker. If your content security policy
@@ -58,30 +62,41 @@ SchemaView.asView({ title: 'Blog API', permissionClasses: [IsAdminUser] })
 
 ## Generating a schema file
 
-For client generation or CI checks, call `generateSchema()` yourself. A small
-[management command](/docs/topics/management-commands/) is enough to write it to disk:
+For client generation, or to commit the schema and review how it changes, write it to a file
+with `generateschema` (DRF's command). It comes from `RestFrameworkConfig`, which
+`startproject` adds to `INSTALLED_APPS`. Older projects can add it themselves:
 
-```ts title="src/api/commands/openapi.ts"
-import { BaseCommand, type ArgumentParser, type CommandIO } from '@ghuri/core'
-import { generateSchema } from '@ghuri/rest'
-import { writeFile } from 'node:fs/promises'
-import { urlpatterns } from '../../urls'
+```ts title="src/settings.ts"
+import { RestFrameworkConfig } from '@ghuri/rest'
 
-export class OpenAPICommand extends BaseCommand {
-  static help = 'Write the OpenAPI schema to a file.'
-  addArguments(parser: ArgumentParser) {
-    parser.option('--file <path>', { default: 'openapi.json' })
-  }
-  async handle(args: Record<string, unknown>, io: CommandIO) {
-    const schema = generateSchema(urlpatterns, { title: 'Blog API', version: '1.0.0' })
-    await writeFile(String(args.file), JSON.stringify(schema, null, 2))
-    io.stdout(io.style.success(`Wrote ${args.file}`))
-  }
-}
+INSTALLED_APPS: [/* … */, RestFrameworkConfig],
 ```
 
-Commands run in Node through the CLI, so importing `node:fs` there is fine. The same function
-works in a test that fails when the API changes shape unexpectedly:
+```sh
+npx ghuri generateschema                          # YAML to stdout
+npx ghuri generateschema --file openapi.yaml
+npx ghuri generateschema --file openapi.json      # JSON, from the extension
+npx ghuri generateschema --format openapi-json --url https://api.example.com
+```
+
+It documents `ROOT_URLCONF`. If that routes a `SchemaView`, the command takes the view's `title`,
+`version`, `description`, `servers`, `patterns` and `prefix`, so the file is the same document
+that `/api/schema/` serves. `--title`, `--description`, `--api-version` and `--url` override
+them. See the [CLI reference](/docs/reference/cli/#generateschema-restframeworkconfig) for every
+option.
+
+Feed the file to `openapi-typescript`, `orval` or any OpenAPI 3.1 generator for typed clients, or
+import it into Postman or Insomnia. To fail CI when the API changes without the committed file
+being updated:
+
+```sh
+npx ghuri generateschema --file openapi.yaml && git diff --exit-code openapi.yaml
+```
+
+### From code
+
+`generateSchema()` returns the same document as a plain object, for a snapshot test that fails
+when the API changes shape, or for your own command:
 
 ```ts
 import { generateSchema } from '@ghuri/rest'
@@ -94,10 +109,7 @@ expect(schema).toMatchSnapshot()
 generateSchema(router, { title: 'Blog API', prefix: 'api/' })
 ```
 
-`generateSchema()` is synchronous and returns the document as a plain object. Pass `servers` to
-fill the `servers` list.
-
-Feed the file to `openapi-typescript`, `orval` or any OpenAPI 3.1 generator for typed clients.
+`generateSchema()` is synchronous. Pass `servers` to fill the `servers` list.
 
 ## What gets documented
 

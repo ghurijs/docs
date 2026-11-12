@@ -44,7 +44,7 @@ import {
   SecurityMiddleware, XFrameOptionsMiddleware,
 } from '@ghuri/core'
 import { d1, postgres } from '@ghuri/orm'
-import { IsAuthenticatedOrReadOnly, PageNumberPagination } from '@ghuri/rest'
+import { IsAuthenticatedOrReadOnly, PageNumberPagination, RestFrameworkConfig } from '@ghuri/rest'
 import { r2 } from '@ghuri/storage'
 import { urlpatterns } from './urls'
 
@@ -59,6 +59,7 @@ export default defineSettings((env) => ({
     SessionsConfig,
     AuthTokenConfig,
     AdminConfig,
+    RestFrameworkConfig,
   ],
 
   MIDDLEWARE: [
@@ -114,24 +115,28 @@ With `--db sqlite`, it is `sqlite({ filename: env.DATABASE_PATH ?? 'db.sqlite3' 
 ### `src/urls.ts`
 
 The root URLconf. Unlike Django, `ROOT_URLCONF` is the pattern array itself, not a dotted
-module path, so the settings file imports it directly. The REST API router lives here too.
+module path, so the settings file imports it directly. The REST API router lives here too, next
+to the [OpenAPI](/docs/topics/rest/openapi/) schema and its Swagger UI and Scalar pages.
 
 ```ts title="src/urls.ts"
 import { admin } from '@ghuri/admin'
 import { include, path } from '@ghuri/core'
-import { DefaultRouter } from '@ghuri/rest'
+import { DefaultRouter, ScalarView, SchemaView, SwaggerUIView } from '@ghuri/rest'
 import type { Context } from 'hono'
 
 /** REST API router: register viewsets here, e.g. `router.register('posts', PostViewSet)`. */
 export const router = new DefaultRouter()
 
 function home(c: Context) {
-  return c.json({ project: 'mysite', admin: '/admin/', api: '/api/' })
+  return c.json({ project: 'mysite', admin: '/admin/', api: '/api/', docs: '/api/docs/' })
 }
 
 export const urlpatterns = [
   path('', home, { name: 'home' }),
   path('admin/', admin.site.urls),
+  path('api/schema/', SchemaView.asView({ title: 'mysite API', version: '0.1.0' }), { name: 'schema' }),
+  path('api/docs/', SwaggerUIView.asView({ urlName: 'schema' }), { name: 'swagger-ui' }),
+  path('api/reference/', ScalarView.asView({ urlName: 'schema' }), { name: 'scalar' }),
   path('api/', include(router.urls)),
 ]
 ```

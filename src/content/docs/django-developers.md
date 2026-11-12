@@ -236,6 +236,7 @@ export class Post extends Model({
 | `serializer = PostSerializer(posts, many=True)` | `new PostSerializer({ instance: posts, many: true })` |
 | `REST_FRAMEWORK = {'PAGE_SIZE': 20}` | `REST_FRAMEWORK: { PAGE_SIZE: 20 }` |
 | `drf-spectacular` | `SchemaView`, `SwaggerUIView`, `ScalarView` (built in) |
+| `./manage.py generateschema --file openapi.yaml` | `npx ghuri generateschema --file openapi.yaml` (`RestFrameworkConfig` in `INSTALLED_APPS`) |
 | `rest_framework.authtoken` | `TokenAuthentication`, `obtainAuthToken` from `@ghuri/auth/rest` |
 | `djangorestframework-simplejwt` | `JWTAuthentication`, `TokenObtainPairView` from `@ghuri/auth/rest` |
 

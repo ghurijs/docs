@@ -424,6 +424,34 @@ npx ghuri flushexpiredtokens
 
 Deletes expired JWT refresh tokens from the outstanding-token list.
 
+## REST commands
+
+### `generateschema` (`RestFrameworkConfig`)
+
+```sh
+npx ghuri generateschema [--file <path>] [--format openapi|openapi-json] [--title <title>]
+  [--description <text>] [--api-version <version>] [--url <url>] [--indent <n>]
+```
+
+Writes the OpenAPI 3.1 schema of the REST API (DRF's `generateschema`). Add `RestFrameworkConfig`
+from `@ghuri/rest` to `INSTALLED_APPS` to get it; `startproject` does. It documents
+`ROOT_URLCONF`, using the options of the first `SchemaView` routed there (title, version,
+description, servers, patterns, prefix), so the output matches what that view serves.
+
+| Option | Meaning |
+|---|---|
+| `--file <path>` | Write to this file instead of stdout. |
+| `--format <format>` | `openapi` (YAML, the default) or `openapi-json`. A `--file` ending in `.json` defaults to JSON. |
+| `--title <title>` | `info.title`. |
+| `--description <text>` | `info.description`. |
+| `--api-version <version>` | `info.version` (DRF's `--api_version`). |
+| `--url <url>` | Base URL of the API, written as `servers: [{ url }]`. |
+| `--indent <n>` | Indentation of the JSON output (default 2). |
+
+See [OpenAPI](/docs/topics/rest/openapi/#generating-a-schema-file).
+
+---
+
 ## GraphQL commands
 
 ### `graphql_schema` (`GraphQLConfig`)
