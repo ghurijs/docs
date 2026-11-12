@@ -85,6 +85,14 @@ const recent = await Post.objects
     Channels-style consumers routed in `urls.ts`, with rooms on Durable Objects that hibernate
     while idle. Send to any room from a view, a signal or a cron job.
   </Card>
+  <Card title="Email" icon="email">
+    `sendMail()` and `EmailMessage` from `django.core.mail`, sent through Cloudflare Email
+    Service, Resend or SMTP, with a test outbox.
+  </Card>
+  <Card title="Multi-tenancy" icon="list-format">
+    Tenant-scoped models and QuerySets that fail closed, with the tenant found from a
+    subdomain, a custom domain or a header.
+  </Card>
   <Card title="AI agents and MCP" icon="rocket">
     Turn models and viewsets into agent tools that respect your permissions, and expose
     them to any MCP client with one URL pattern.

@@ -305,6 +305,39 @@ copied from Django keeps working.
 See [Social login](/docs/topics/social-login/). For custom flows (your own IdP, magic links, API keys) see
 [Login strategies](/docs/topics/login-strategies/).
 
+## Email
+
+| Django | Ghuri (`@ghuri/mail`) |
+|---|---|
+| `send_mail(subject, message, from_email, recipient_list, html_message=…)` | `await sendMail(subject, message, fromEmail, recipientList, { htmlMessage })` |
+| `send_mass_mail(datatuple)`, `mail_admins()`, `mail_managers()` | `await sendMassMail(tuples)`, `await mailAdmins()`, `await mailManagers()` |
+| `EmailMessage(subject, body, from_email, to, bcc, …)` | `new EmailMessage(subject, body, { fromEmail, to, bcc, … })` |
+| `EmailMultiAlternatives` + `attach_alternative(html, 'text/html')` | `EmailMultiAlternatives` + `attachAlternative(html, 'text/html')` |
+| `get_connection()` | `getConnection()` |
+| `EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'` | `EMAIL_BACKEND: smtpBackend()` from `@ghuri/mail/smtp` (Node only) |
+| console / locmem / dummy backends | `consoleBackend()`, `locmemBackend()`, `dummyBackend()` |
+| `mail.outbox` in tests | `outbox` from `@ghuri/mail/testing` (with `useOutbox()`) |
+
+On Workers, use `cloudflareEmailBackend()` or `resendBackend({ apiKey })`. There is no default
+SMTP backend. See [Sending email](/docs/topics/email/).
+
+## Multi-tenancy
+
+Django has no built-in multi-tenancy. `@ghuri/tenants` uses one shared schema with a tenant
+foreign key on every row, like `django-multitenant` or `django-scopes`, rather than
+`django-tenants`' schema per tenant, which D1 and SQLite cannot do.
+
+| Django add-ons | Ghuri (`@ghuri/tenants`) |
+|---|---|
+| `TenantModel` / a `tenant` FK on each model | `tenantModel({ field: 'store', to: () => Store })` as the model factory |
+| `TenantMainMiddleware` (by domain) | `TenantMiddleware` + `TENANTS.RESOLVERS` (`HostResolver`, `SubdomainResolver`, `HeaderResolver`) |
+| `with scope(store=s):` (django-scopes) | `await runAsTenant(s, async () => { … })` |
+| `with scopes_disabled():` | `withoutTenant(() => …)` or `Model.unscoped` |
+| `connection.set_tenant(t)` (django-tenants) | `activateTenant(t)` |
+| `ScopeError` when no scope is active | `TenantNotSet`: queries fail closed |
+
+See [Multi-tenancy](/docs/topics/multi-tenancy/).
+
 ## Signals, cache, commands
 
 | Django | Ghuri |

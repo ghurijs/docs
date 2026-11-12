@@ -51,8 +51,10 @@ cannot express.
 
 ## The packages
 
-Ghuri is split into packages under the `@ghuri` npm scope. A new project installs all of them
-except `@ghuri/agents`, which you add when you want it; you can drop the ones you do not use.
+Ghuri is split into packages under the `@ghuri` npm scope. A new project installs the core set
+(`core`, `orm`, `auth`, `rest`, `storage`, `admin`, `cli`, plus `graphql` with
+`startproject --graphql`). You add the others when you want them, and can drop the ones you do
+not use.
 
 | Package | Contains |
 |---|---|
@@ -62,6 +64,12 @@ except `@ghuri/agents`, which you add when you want it; you can drop the ones yo
 | `@ghuri/rest` | serializers, API views, viewsets, routers, permissions, pagination, filters, throttling, OpenAPI |
 | `@ghuri/storage` | storage API with R2, S3, filesystem (`@ghuri/storage/fs`) and memory backends; `FileField`, `ImageField` |
 | `@ghuri/admin` | the admin site, server-rendered with Hono JSX and htmx |
+| `@ghuri/graphql` | GraphQL in graphene-django style: model types, Relay connections and filters, serializer mutations, GraphiQL |
+| `@ghuri/realtime` | WebSockets in Django Channels style: consumers routed in `urls.ts`, rooms on Durable Objects, a channel layer |
+| `@ghuri/oauth` | Passport.js-style login strategies: OAuth2, OpenID Connect, local, magic link, bearer |
+| `@ghuri/socialauth` | social login like django-allauth: GitHub, Google, Microsoft and other providers, any OpenID Connect provider |
+| `@ghuri/mail` | email like `django.core.mail`: `sendMail`, `EmailMessage`; Cloudflare Email, Resend, SMTP, console and test backends |
+| `@ghuri/tenants` | shared-schema multi-tenancy: tenant-scoped models and QuerySets that fail closed, request resolvers, leak tests |
 | `@ghuri/agents` | AI agents whose tools come from your models and viewsets; an MCP server |
 | `@ghuri/cli` | the `ghuri` command |
 | `create-ghuri` | `npm create ghuri@latest` |

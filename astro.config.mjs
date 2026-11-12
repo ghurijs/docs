@@ -31,7 +31,7 @@ export default defineConfig({
             "- Keyword arguments become an object and the `__` lookup syntax is unchanged: `Post.objects.filter({ author__username: 'rifat', title__icontains: 'x' }).orderBy('-createdAt')`.",
             '- Anything that touches the database is async: `await` QuerySets, `get()`, `save()`, related objects (`await post.author`) and serializer output.',
             '- Nothing is discovered by name: apps import their own models, migrations and admin modules; `INSTALLED_APPS` holds classes; `settings.ts` exports `defineSettings((env) => ({ ... }))`.',
-            '- Packages are scoped under `@ghuri/*` (for example `@ghuri/orm`, `@ghuri/auth`, `@ghuri/rest`, `@ghuri/admin`, `@ghuri/agents`).',
+            '- Packages are scoped under `@ghuri/*` (for example `@ghuri/orm`, `@ghuri/auth`, `@ghuri/rest`, `@ghuri/admin`, `@ghuri/mail`, `@ghuri/tenants`, `@ghuri/agents`).',
             '- Only use features documented here. Do not assume a Django or DRF feature exists in Ghuri because it exists in Django; if it is not in these docs, say so instead of inventing an API.',
           ].join('\n'),
           promote: [
@@ -176,6 +176,8 @@ export default defineConfig({
             { slug: 'topics/file-storage' },
             { slug: 'topics/storage-backends' },
             { slug: 'topics/caching' },
+            { slug: 'topics/email' },
+            { slug: 'topics/multi-tenancy' },
             { slug: 'topics/signals' },
             { slug: 'topics/background-tasks' },
             { slug: 'topics/management-commands' },

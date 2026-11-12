@@ -19,6 +19,12 @@ Each package lives in its own repository and publishes to npm under the `@ghuri`
 | [`ghurijs/rest`](https://github.com/ghurijs/rest) | `@ghuri/rest` | the REST framework |
 | [`ghurijs/storage`](https://github.com/ghurijs/storage) | `@ghuri/storage` | storage backends, `FileField` |
 | [`ghurijs/admin`](https://github.com/ghurijs/admin) | `@ghuri/admin` | the admin site |
+| [`ghurijs/graphql`](https://github.com/ghurijs/graphql) | `@ghuri/graphql` | GraphQL (graphene-django style) |
+| [`ghurijs/realtime`](https://github.com/ghurijs/realtime) | `@ghuri/realtime` | WebSockets (Django Channels style) |
+| [`ghurijs/oauth`](https://github.com/ghurijs/oauth) | `@ghuri/oauth` | login strategies: OAuth2, OpenID Connect, magic link |
+| [`ghurijs/socialauth`](https://github.com/ghurijs/socialauth) | `@ghuri/socialauth` | social login (django-allauth style) |
+| [`ghurijs/mail`](https://github.com/ghurijs/mail) | `@ghuri/mail` | sending email |
+| [`ghurijs/tenants`](https://github.com/ghurijs/tenants) | `@ghuri/tenants` | shared-schema multi-tenancy |
 | [`ghurijs/agents`](https://github.com/ghurijs/agents) | `@ghuri/agents` | AI agents and the MCP server |
 | [`ghurijs/cli`](https://github.com/ghurijs/cli) | `@ghuri/cli` | the `ghuri` command |
 | [`ghurijs/create-ghuri`](https://github.com/ghurijs/create-ghuri) | `create-ghuri` | `npm create ghuri@latest` |

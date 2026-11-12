@@ -299,6 +299,49 @@ REALTIME: {
 
 See [WebSockets](/docs/topics/websockets/).
 
+## Email (`@ghuri/mail`)
+
+```ts
+EMAIL_BACKEND: env.RESEND_API_KEY ? resendBackend({ apiKey: env.RESEND_API_KEY }) : cloudflareEmailBackend(),
+DEFAULT_FROM_EMAIL: 'Blog <noreply@blog.example.com>',
+ADMINS: ['Jane <jane@blog.example.com>'],
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `EMAIL_BACKEND` | `EmailBackendConfig` | `consoleBackend()` in `DEBUG`, otherwise none | `cloudflareEmailBackend()`, `resendBackend({ apiKey })`, `smtpBackend()` (from `@ghuri/mail/smtp`), `consoleBackend()`, `locmemBackend()` or `dummyBackend()`. Sending with none set raises `ImproperlyConfigured`. |
+| `DEFAULT_FROM_EMAIL` | `string` | `'webmaster@localhost'` | Sender when `sendMail()` or `EmailMessage` gets none. |
+| `SERVER_EMAIL` | `string` | `'root@localhost'` | Sender of `mailAdmins()` and `mailManagers()`. |
+| `EMAIL_SUBJECT_PREFIX` | `string` | `'[Ghuri] '` | Prefix of `mailAdmins()` and `mailManagers()` subjects. |
+| `ADMINS` | `string[]` | `[]` | Who gets `mailAdmins()`: address strings such as `'Jane <jane@example.com>'`. |
+| `MANAGERS` | `string[]` | `[]` | Who gets `mailManagers()`. |
+| `EMAIL_TIMEOUT` | `number \| null` | `null` | Seconds before a network backend (Resend, SMTP) gives up; `null` waits forever. |
+| `EMAIL_HOST` | `string` | `'localhost'` | SMTP host for `smtpBackend()`. |
+| `EMAIL_PORT` | `number` | `25` | SMTP port. |
+| `EMAIL_HOST_USER` | `string` | `''` | SMTP username; empty skips AUTH. |
+| `EMAIL_HOST_PASSWORD` | `string` | `''` | SMTP password. |
+| `EMAIL_USE_TLS` | `boolean` | `false` | Upgrade with STARTTLS (usually port 587). |
+| `EMAIL_USE_SSL` | `boolean` | `false` | Implicit TLS (usually port 465). Not together with `EMAIL_USE_TLS`. |
+
+See [Sending email](/docs/topics/email/).
+
+## Tenants (`@ghuri/tenants`)
+
+```ts
+TENANTS: {
+  MODEL: 'stores.Store',
+  RESOLVERS: [new SubdomainResolver({ domain: 'myshop.example' }), new HostResolver()],
+},
+```
+
+| Key (`TENANTS.*`) | Type | Default | Description |
+|---|---|---|---|
+| `MODEL` | `string \| ModelClass` | none | The tenant model, as `'app_label.ModelName'` or the class. Target of `TenantModel` foreign keys and default model of the resolvers. |
+| `RESOLVERS` | `TenantResolverEntry[]` | `[]` | What `TenantMiddleware` tries, in order: `HeaderResolver`, `SubdomainResolver`, `HostResolver` or `async (c) => tenant \| null`. |
+| `REQUIRED` | `boolean` | `false` | Answer 404 when no resolver finds a tenant. Otherwise the request runs with no tenant. |
+
+See [Multi-tenancy](/docs/topics/multi-tenancy/).
+
 ## Social login (`@ghuri/socialauth`)
 
 | Key (`SOCIALACCOUNT.*`) | Type | Default | Description |

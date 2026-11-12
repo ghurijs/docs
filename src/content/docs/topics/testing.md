@@ -233,6 +233,25 @@ CACHES: { default: env.CACHE ? kvCache('CACHE') : memoryCache() },
 Test `env` objects have no `MEDIA` or `CACHE` binding, so tests get in-memory storage and cache
 with no extra setup.
 
+Email has its own test outbox. `useOutbox()` from `@ghuri/mail/testing` sends every message to
+`outbox`, Django's `mail.outbox`:
+
+```ts
+import { outbox, restoreEmailBackend, useOutbox } from '@ghuri/mail/testing'
+
+beforeEach(() => useOutbox())
+afterEach(() => restoreEmailBackend())
+
+it('emails the author', async () => {
+  await client.post('/api/posts/1/publish/')
+  expect(outbox[0].to).toEqual(['jane@example.com'])
+})
+```
+
+See [Sending email](/docs/topics/email/#testing). For multi-tenant apps,
+`assertTenantIsolation()` from `@ghuri/tenants/testing` checks that no tenant sees another's
+rows; see [Multi-tenancy](/docs/topics/multi-tenancy/#testing-for-leaks).
+
 To test against real Workers bindings (KV, R2, Durable Objects), use Cloudflare's
 [`@cloudflare/vitest-pool-workers`](https://developers.cloudflare.com/workers/testing/vitest-integration/)
 and pass its `env` to `app.setup` and `createTestClient`. Tests then run inside `workerd`.

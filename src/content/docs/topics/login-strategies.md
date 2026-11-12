@@ -25,6 +25,7 @@ npm install @ghuri/oauth@next
 // src/accounts/strategies.ts
 import { MagicLinkStrategy, OIDCStrategy, strategies } from '@ghuri/oauth'
 import { User } from '@ghuri/auth'
+import { sendMail } from '@ghuri/mail'
 
 strategies.use(
   'acme',
@@ -45,7 +46,7 @@ strategies.use(
 strategies.use(
   'email',
   new MagicLinkStrategy(
-    { send: async ({ email, url }) => sendMail(email, 'Your login link', url) },
+    { send: async ({ email, url }) => { await sendMail('Your login link', url, null, [email]) } },
     async ({ email }) => User.objects.filter({ email }).first(),
   ),
 )
