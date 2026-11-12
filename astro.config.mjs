@@ -1,6 +1,7 @@
 // @ts-check
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
+import starlightLlmsTxt from 'starlight-llms-txt'
 
 export default defineConfig({
   site: 'https://ghurijs.github.io',
@@ -17,6 +18,98 @@ export default defineConfig({
       editLink: { baseUrl: 'https://github.com/ghurijs/docs/edit/main/' },
       lastUpdated: true,
       customCss: ['./src/styles/custom.css'],
+      plugins: [
+        starlightLlmsTxt({
+          projectName: 'Ghuri',
+          description:
+            'Ghuri is a Django-style web framework for TypeScript, built on Hono and Drizzle, that runs on Cloudflare Workers (D1, R2, KV) by default and on Node with Postgres by changing settings.',
+          details: [
+            'Important notes for language models:',
+            '',
+            '- Ghuri is TypeScript, not Python. Never write Python, `manage.py`, decorators or `snake_case` method names in a Ghuri project. Commands are `npx ghuri <command>` (`makemigrations`, `migrate`, `startapp`, `createsuperuser`, `shell`, `test`).',
+            '- The APIs mirror Django and Django REST framework concepts, but options and methods are camelCase: `maxLength`, `orderBy`, `selectRelated`, `valuesList`, `performCreate`. Settings keys stay `UPPER_SNAKE` (`INSTALLED_APPS`, `DATABASES`).',
+            "- Keyword arguments become an object and the `__` lookup syntax is unchanged: `Post.objects.filter({ author__username: 'rifat', title__icontains: 'x' }).orderBy('-createdAt')`.",
+            '- Anything that touches the database is async: `await` QuerySets, `get()`, `save()`, related objects (`await post.author`) and serializer output.',
+            '- Nothing is discovered by name: apps import their own models, migrations and admin modules; `INSTALLED_APPS` holds classes; `settings.ts` exports `defineSettings((env) => ({ ... }))`.',
+            '- Packages are scoped under `@ghuri/*` (for example `@ghuri/orm`, `@ghuri/auth`, `@ghuri/rest`, `@ghuri/admin`, `@ghuri/agents`).',
+            '- Only use features documented here. Do not assume a Django or DRF feature exists in Ghuri because it exists in Django; if it is not in these docs, say so instead of inventing an API.',
+          ].join('\n'),
+          promote: [
+            'index*',
+            'getting-started/introduction',
+            'getting-started/installation',
+            'getting-started/project-layout',
+            'django-developers',
+            'tutorial/**',
+            'topics/settings',
+            'topics/applications',
+            'topics/urls-and-views',
+            'topics/middleware',
+            'topics/models',
+            'topics/queries',
+            'topics/relations',
+            'topics/migrations',
+            'topics/transactions',
+            'topics/admin*',
+            'topics/rest',
+            'topics/rest/serializers',
+            'topics/rest/views',
+            'topics/rest/routers',
+            'topics/rest/**',
+            'topics/**',
+            'reference/**',
+          ],
+          demote: ['deployment/**', 'contributing'],
+          exclude: ['contributing'],
+          // Starlight's heading anchor links render as "[Section titled …](#…)" noise.
+          customSelectors: { all: ['.sl-anchor-link'] },
+          customSets: [
+            {
+              label: 'ORM',
+              description: 'models, fields, QuerySets and lookups, relations, migrations and transactions',
+              paths: [
+                'topics/models',
+                'topics/queries',
+                'topics/relations',
+                'topics/migrations',
+                'topics/transactions',
+                'reference/fields',
+                'reference/lookups',
+              ],
+            },
+            {
+              label: 'REST framework',
+              description: 'serializers, views and viewsets, routers, permissions, pagination, filtering, throttling and OpenAPI',
+              paths: ['topics/rest', 'topics/rest/**'],
+            },
+            {
+              label: 'Admin',
+              description: 'registering models with the admin site and the ModelAdmin reference',
+              paths: ['topics/admin', 'topics/admin-reference'],
+            },
+            {
+              label: 'Auth',
+              description: 'users, groups and permissions, sessions, tokens and JWT, and REST authentication and permission classes',
+              paths: [
+                'topics/authentication',
+                'topics/auth-tokens',
+                'topics/rest/authentication',
+                'topics/rest/permissions',
+              ],
+            },
+            {
+              label: 'Agents',
+              description: 'AI agents built from models, viewsets and permissions, and exposing them over MCP',
+              paths: ['topics/agents', 'topics/agents-mcp'],
+            },
+            {
+              label: 'Deployment',
+              description: 'deploying to Cloudflare Workers, Node with Postgres and Docker, and migrating from D1 to Postgres',
+              paths: ['deployment/**'],
+            },
+          ],
+        }),
+      ],
       sidebar: [
         {
           label: 'Getting started',
@@ -25,6 +118,7 @@ export default defineConfig({
             { slug: 'getting-started/installation' },
             { slug: 'getting-started/project-layout' },
             { slug: 'django-developers' },
+            { slug: 'topics/ai-assisted-development' },
           ],
         },
         {

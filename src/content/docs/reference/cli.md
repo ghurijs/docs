@@ -212,6 +212,54 @@ npx ghuri help [command]
 `version` prints the CLI version plus the project's `@ghuri/*`, `hono`, `wrangler` and Node
 versions (`--short` prints only the CLI version).
 
+### `mcp`
+
+```sh
+npx ghuri mcp [--docs-url <url-or-file>]
+```
+
+Runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio for AI coding
+agents (Claude Code, Codex, Cursor, VS Code and other MCP clients). Configure the client to run
+`npx ghuri mcp` in the project directory, for example:
+
+```sh
+claude mcp add ghuri -- npx ghuri mcp
+```
+
+or commit a `.mcp.json` (Claude Code; Cursor reads the same shape from `.cursor/mcp.json`):
+
+```json
+{ "mcpServers": { "ghuri": { "command": "npx", "args": ["ghuri", "mcp"] } } }
+```
+
+```toml
+# Codex: ~/.codex/config.toml or .codex/config.toml
+[mcp_servers.ghuri]
+command = "npx"
+args = ["ghuri", "mcp"]
+```
+
+VS Code uses `.vscode/mcp.json` with a `servers` key:
+`{ "servers": { "ghuri": { "type": "stdio", "command": "npx", "args": ["ghuri", "mcp"] } } }`.
+
+| Tool | What it does |
+|---|---|
+| `project_info` | Settings module, runtime, bindings, `DEBUG`, `INSTALLED_APPS`, `DATABASES`, `STORAGES`, `CACHES`, `MIDDLEWARE`, other settings (secrets hidden), package versions |
+| `list_apps` | Installed apps with their models, commands and migrations |
+| `list_models` / `describe_model` | Models, fields and options, relations, reverse relations, Meta and managers |
+| `list_routes` | URL patterns, like `routes` |
+| `list_commands` | Every command, like `help` |
+| `show_migrations` | Applied and unapplied migrations on the local database |
+| `run_command` | Runs a command (`check`, `makemigrations`, `migrate`, `test`, `startapp`, app commands, …) and returns the exit code and output |
+| `search_docs` / `get_doc` | Searches and reads this documentation ([llms-full.txt](https://ghurijs.github.io/docs/llms-full.txt)) |
+
+The project is reloaded in a child process whenever a source file changed, so the agent sees its
+own edits, and a project that fails to load returns the error to the agent instead of stopping the
+server. Only protocol messages are written to stdout. `run_command` refuses `runserver`, `shell`,
+`dbshell`, `deploy`, `flush`, `startproject`, `mcp`, `createsuperuser` without `--no-input`,
+`test --watch` and `--remote`, so an agent never touches production bindings. `--docs-url` (or
+`GHURI_DOCS_URL`) reads the docs from another URL or a local file.
+
 ---
 
 ## Database commands
