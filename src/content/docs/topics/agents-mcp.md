@@ -1,6 +1,6 @@
 ---
 title: MCP server
-description: Expose your agents, models, viewsets and REST routers as Model Context Protocol tools, authenticate clients with API tokens, and connect Claude Desktop and Claude Code.
+description: Expose your agents, models, viewsets and REST routers as Model Context Protocol tools, authenticate clients with API tokens or OAuth, and connect Claude Desktop and Claude Code.
 ---
 
 `@ghuri/agents` includes a [Model Context Protocol](https://modelcontextprotocol.io) server, so
@@ -82,6 +82,8 @@ To give MCP clients direct access to the same toolkits, pass them in `tools`.
 | `authenticationClasses` | `AGENTS.AUTHENTICATION_CLASSES`, then `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES` | Who the caller is |
 | `permissionClasses` | `AGENTS.PERMISSION_CLASSES`, i.e. `[IsAuthenticated]` | Access to the endpoint |
 | `allowAnyOrigin` | `false` | Accept browser `Origin`s other than your host and `CSRF_TRUSTED_ORIGINS` |
+| `oauth` | unset | OAuth mode: Bearer access tokens, Protected Resource Metadata and per-tool scopes. See [MCP server with OAuth](/docs/topics/mcp-oauth/) |
+| `listTtlMs` | `300000` | How long 2026-07-28 clients may cache `tools/list` and `server/discover` |
 
 Mount the endpoint with a trailing slash and give clients that exact URL. `APPEND_SLASH` only
 redirects `GET` requests, and MCP uses `POST`.
@@ -95,29 +97,45 @@ through the `mcp-remote` bridge (below).
 
 Supported MCP protocol versions, newest first:
 
-| Version |
-|---|
-| `2025-11-25` (the default when the client asks for an unknown version) |
-| `2025-06-18` |
-| `2025-03-26` |
-| `2024-11-05` |
+| Version | |
+|---|---|
+| `2026-07-28` | Stateless: no `initialize` and no session |
+| `2025-11-25` | Legacy, negotiated with `initialize` (the answer when a client asks `initialize` for an unknown or newer version) |
+| `2025-06-18` | Legacy |
+| `2025-03-26` | Legacy |
+| `2024-11-05` | Legacy |
 
-`initialize` echoes the client's requested version when it is in this list. A request with an
-`MCP-Protocol-Version` header outside the list gets `400`.
+Both eras are served on the same endpoint, and the server picks the era from each request.
 
-Supported methods: `initialize`, `ping`, `notifications/*` (answered `202`), `tools/list`,
-`tools/call` (text content plus `structuredContent`; tool failures are results with
-`isError: true`), and empty `resources/list`, `resources/templates/list` and `prompts/list`.
-Batches are accepted. Errors use the JSON-RPC codes `-32700`, `-32600`, `-32601`, `-32602`,
-`-32603`, and `-32001` for authentication and permission failures.
+**2026-07-28 requests** carry `_meta` fields `io.modelcontextprotocol/protocolVersion` and
+`io.modelcontextprotocol/clientCapabilities`, plus `MCP-Protocol-Version` and `Mcp-Method` headers
+(`Mcp-Name` on `tools/call`). There is no handshake.
+
+- **Validation.** Missing `_meta` fields get `400` with `-32602`. Missing or mismatched headers get `-32020`. An
+  unsupported version gets `-32022` with `data.supported` and `data.requested`. Header values in the
+  `=?base64?…?=` form are decoded.
+- **Methods.** `server/discover`, `tools/list`, `tools/call`, and empty `resources/list`,
+  `resources/templates/list` and `prompts/list`. Unknown and removed methods (`ping`, `logging/setLevel`) get
+  `404` with `-32601`.
+- **Results.** Every result has `resultType: "complete"` and `io.modelcontextprotocol/serverInfo` in its
+  `_meta`. Lists carry `ttlMs` and `cacheScope` (`private` in OAuth mode, where the list depends on the token).
+- **Batches** are refused. Notifications get `202`.
+
+**Legacy requests** work as before. The methods are `initialize`, which echoes a supported legacy version, `ping`,
+`notifications/*` (answered `202`), `tools/list`, `tools/call` (text content plus `structuredContent`; tool failures
+are results with `isError: true`), and the empty lists. Batches are accepted. A legacy request whose
+`MCP-Protocol-Version` header is not a supported version gets `400`.
+
+Errors use the JSON-RPC codes `-32700`, `-32600`, `-32601`, `-32602`, `-32603`, and `-32001` for
+authentication and permission failures. `Mcp-Session-Id` is never issued, and it is ignored when a client sends it.
 
 ## Authentication
 
-:::caution[No OAuth]
-The server does **not** implement the MCP authorization spec (OAuth 2.1, dynamic client
-registration, protected-resource metadata). Clients authenticate with a static credential in the
-`Authorization` header, checked by your REST authentication classes. Use a client that lets you
-set request headers, or the `mcp-remote` bridge.
+:::tip[OAuth]
+For clients that connect with OAuth (Claude.ai, ChatGPT, Claude Code and Codex without
+configuring headers), turn on OAuth mode with `@ghuri/oauth-provider` as the authorization
+server. See [MCP server with OAuth](/docs/topics/mcp-oauth/). This section covers static
+credentials, which remain the simplest choice for scripts and internal clients.
 :::
 
 Requests are authenticated by `AGENTS.AUTHENTICATION_CLASSES` (falling back to
@@ -225,8 +243,8 @@ platforms. Restart Claude Desktop after editing the file.
 
 :::note
 Claude Desktop's remote connector settings take a URL but no custom request headers, so they
-cannot send the token, and this server has no OAuth flow to fall back on. Use the `mcp-remote`
-configuration above.
+cannot send a static token. Use the `mcp-remote` configuration above, or turn on
+[OAuth mode](/docs/topics/mcp-oauth/) so the connector can log in.
 :::
 
 ### Other clients
