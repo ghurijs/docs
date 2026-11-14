@@ -257,6 +257,7 @@ export class Post extends Model({
 | `GRAPHENE = {'SCHEMA': 'mysite.schema.schema'}` | `GRAPHQL: { SCHEMA: schema }` |
 | `./manage.py graphql_schema` | `npx ghuri graphql_schema` |
 | `@login_required` (django-graphql-jwt) | `loginRequired(resolver)` |
+| `graphene_file_upload`: `Upload` + `FileUploadGraphQLView` | `Upload` from `@ghuri/graphql`; `GraphQLView` handles the multipart request |
 
 See [GraphQL](/docs/topics/graphql/).
 

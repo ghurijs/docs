@@ -317,6 +317,71 @@ class PublishPost extends Mutation {
 
 `ClientIDMutation` (`static Input`, `static mutateAndGetPayload()`) is the Relay variant.
 
+### File uploads
+
+An argument or input field typed `Upload` receives a web `File` (`name`, `type`, `size`,
+`arrayBuffer()`, `stream()`). Clients send it as a
+[GraphQL multipart request](https://github.com/jaydenseric/graphql-multipart-request-spec), as
+apollo-upload-client, urql and graphql-request do, so you don't need a separate REST endpoint
+for files.
+
+```ts title="src/blog/schema.ts (continued)"
+import { Field, ID, loginRequired, Mutation, NonNull, Upload } from '@ghuri/graphql'
+import { upload } from '@ghuri/storage'
+import { Post } from './models'
+// PostType: defined above
+
+class SetCover extends Mutation {
+  static Arguments = { id: NonNull(ID), cover: NonNull(Upload) }   // `scalar Upload` in the SDL
+  static fields = { post: Field(PostType) }
+  static mutate = loginRequired(async (_root: unknown, { id, cover }: { id: string; cover: File }) => {
+    const post = await Post.objects.get({ id })
+    post.cover = upload(cover)                                       // an ImageField
+    await post.save()
+    return { post }
+  })
+}
+```
+
+The request is `multipart/form-data` with an `operations` part (the usual JSON body with each
+file replaced by `null`), a `map` part (which file goes where) and the files:
+
+```sh
+curl https://example.com/graphql/ \
+  -H 'Authorization: Bearer <jwt>' \
+  -F operations='{ "query": "mutation ($id: ID!, $f: Upload!) { setCover(id: $id, cover: $f) { post { id } } }", "variables": { "id": "1", "f": null } }' \
+  -F map='{ "0": ["variables.f"] }' \
+  -F 0=@cover.png
+```
+
+- **When.** `GraphQLView` accepts multipart requests as soon as the schema uses `Upload`.
+  `uploads: false` (or `GRAPHQL.UPLOADS`) turns them off, and they get 415 again. `Upload` works
+  in lists (`List(Upload)`), in input objects and in batches (map paths such as
+  `0.variables.file`, with `batch: true`).
+- **Malformed requests are 400:** a missing or invalid `operations` or `map`, a map path that is
+  not an existing `null` inside an operation's `variables`, or a map entry without its file.
+- **Limits are 413.** `maxFileSize` (default 10 MiB per file), `maxUploadSize` (default 25 MiB
+  for the whole body) and `maxFiles` (default 10), per view or as `GRAPHQL.UPLOAD_MAX_FILE_SIZE`,
+  `UPLOAD_MAX_SIZE` and `UPLOAD_MAX_FILES`. A larger `Content-Length` is refused before the body
+  is read; a body without one is cut off once it passes `maxUploadSize`. Files are buffered in
+  memory (a Worker has 128 MB), so keep the limits modest and send big files straight to storage
+  with presigned URLs.
+- **CSRF.** Browsers send a multipart `POST` cross-site without a CORS preflight, so multipart
+  requests go through the same checks as every other request:
+  - Session-authenticated requests need the CSRF token, either as the `X-CSRFToken` header or as
+    a `csrfmiddlewaretoken` part.
+  - Token and JWT requests authenticate with a header that a cross-site form cannot set.
+  - **Anonymous** multipart requests must also send a header that forces a preflight:
+    `GraphQL-Require-Preflight`, `Apollo-Require-Preflight`, `X-Apollo-Operation-Name`, the CSRF
+    header or `Authorization`, with any non-empty value. Without one they get 400 with
+    `extensions.code: "CSRF_PREVENTION"`. This is how Apollo Server's `csrfPrevention` works.
+    `uploadCsrfPrevention: false` turns this check off.
+- **Without HTTP.** `schema.execute(source, { variables: { file } })` takes `File` or `Blob`
+  values directly (a `Blob` becomes a `File` named `blob`). `uploadFormData({ query, variables })`
+  builds the multipart body from such variables, for Node scripts and tests.
+- `Upload` is input only: returning it, or writing a literal in the query (`cover: "x"`), is an
+  error.
+
 ## Authentication and permissions
 
 `info.context.user` is the request user. The view authenticates with `authenticationClasses` (or
@@ -326,6 +391,7 @@ the user set by `AuthenticationMiddleware`.
 - **CSRF.** The view is exempt from `CsrfMiddleware`, so token and JWT clients just send the
   `Authorization` header. CSRF is enforced for **session-authenticated `POST`s**; GraphiQL sends
   the token for you. Invalid credentials give 401 with `WWW-Authenticate`, CSRF failures 403.
+  Anonymous multipart uploads also need a preflight header (see [File uploads](#file-uploads)).
 - **Decorators** for resolvers: `loginRequired`, `staffMemberRequired`, `superuserRequired`,
   `permissionRequired('blog.change_post')`, `userPassesTest(fn)`. Anonymous users get
   `extensions.code: "UNAUTHENTICATED"`, others `"PERMISSION_DENIED"`.
@@ -344,7 +410,8 @@ the user set by `AuthenticationMiddleware`.
 [GraphQL over HTTP](https://graphql.github.io/graphql-over-http/) specification:
 
 - `GET` with `query`, `variables` and `operationName` parameters (queries only: a mutation over
-  `GET` is **405**), `POST` with `application/json`, `application/graphql` or a form.
+  `GET` is **405**), `POST` with `application/json`, `application/graphql` or a form, and
+  `multipart/form-data` uploads when the schema uses `Upload` (see [File uploads](#file-uploads)).
 - With `Accept: application/graphql-response+json`, parse and validation errors are **400**;
   with `application/json` (or no `Accept`) every well-formed request is 200 with `errors` in the
   body. Malformed JSON or a missing query is 400, other content types 415.
@@ -356,7 +423,8 @@ the user set by `AuthenticationMiddleware`.
   `extensions.exception`.
 - Options of `asView()`: `schema`, `graphiql`, `authenticationClasses`, `batch`, `maxDepth`,
   `maxComplexity`, `introspection`, `validationRules`, `persistedQueries` (`documentId` or APQ
-  hashes → query text) with `persistedQueriesOnly`, `getContext(c, ctx)` and `debug`.
+  hashes → query text) with `persistedQueriesOnly`, `getContext(c, ctx)`, `debug`, and for
+  uploads `uploads`, `maxFileSize`, `maxUploadSize`, `maxFiles` and `uploadCsrfPrevention`.
 
 ## Performance
 
@@ -388,6 +456,10 @@ GRAPHQL: {
   BATCH: false,
   AUTHENTICATION_CLASSES: [TokenAuthentication, SessionAuthentication],
   OPTIMIZE: false,
+  UPLOADS: true,                      // default: when the schema uses Upload
+  UPLOAD_MAX_FILE_SIZE: 10 * 1024 * 1024,
+  UPLOAD_MAX_SIZE: 25 * 1024 * 1024,
+  UPLOAD_MAX_FILES: 10,
 },
 ```
 
