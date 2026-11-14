@@ -275,6 +275,11 @@ GRAPHQL: {
 | `BATCH` | `boolean` | `false` | Accept arrays of operations in one request. |
 | `AUTHENTICATION_CLASSES` | `AuthenticationClass[]` | none (the user from `AuthenticationMiddleware`) | Authentication for `GraphQLView`, e.g. the classes from `@ghuri/auth/rest`. Session-authenticated `POST`s must carry the CSRF token. |
 | `OPTIMIZE` | `boolean` | `false` | Apply the query optimizer (`selectRelated` / `prefetchRelated`) to every root list and connection. |
+| `UPLOADS` | `boolean` | when the schema uses `Upload` | Accept `multipart/form-data` file uploads (GraphQL multipart request spec). |
+| `UPLOAD_MAX_FILE_SIZE` | `number` | `10485760` (10 MiB) | Largest uploaded file in bytes; larger → 413. |
+| `UPLOAD_MAX_SIZE` | `number` | `26214400` (25 MiB) | Largest multipart body in bytes, files included; larger → 413, checked against `Content-Length` before reading. |
+| `UPLOAD_MAX_FILES` | `number` | `10` | Most files in one multipart request; more → 413. |
+| `UPLOAD_CSRF_PREVENTION` | `boolean` | `true` | Anonymous multipart requests must send a preflight-forcing header (`GraphQL-Require-Preflight`, `Apollo-Require-Preflight`, `X-Apollo-Operation-Name`, the CSRF header or `Authorization`). |
 
 `GraphQLView.asView({ … })` options override these per view. See [GraphQL](/docs/topics/graphql/).
 
