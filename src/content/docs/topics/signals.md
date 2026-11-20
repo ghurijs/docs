@@ -22,6 +22,7 @@ after another**, before `send()` resolves.
 | `userLoginFailed` | `@ghuri/auth` | when `authenticate()` finds no matching backend | `c`, `credentials` (secrets masked) |
 | `requestStarted` | `@ghuri/core` | when a request enters the app | `request` |
 | `requestFinished` | `@ghuri/core` | after the response is produced | `request`, `response` |
+| `runFinished` | `@ghuri/agents` | after every agent run, successful or failed (sender: the agent class; a failing receiver is logged, never fails the run) | `agent`, `context`, `model`, `result` or `error`, `durationMs`, `run` |
 
 Every receiver also receives `sender`: the model class for ORM model signals, the app object
 for request signals.

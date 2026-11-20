@@ -16,8 +16,9 @@ It works the same on D1, SQLite and Postgres: one database, one migration run, a
 after a [D1 to Postgres move](/docs/deployment/d1-to-postgres/).
 
 :::note[Alpha]
-`@ghuri/tenants` is at `0.1.0-alpha.0` and needs `@ghuri/core` and `@ghuri/orm` `0.1.0-alpha.1` or
-later. Database-per-tenant routing, `dumpdata --tenant`, Postgres row-level security and a
+`@ghuri/tenants` is at `0.1.0-alpha.2` and needs `@ghuri/core` `0.1.0-alpha.1` and `@ghuri/orm`
+`0.1.0-alpha.3` or later (plus `@ghuri/auth` `0.1.0-alpha.4` for
+[per-tenant users](#per-tenant-users)). Database-per-tenant routing, `dumpdata --tenant`, Postgres row-level security and a
 membership permission class for `@ghuri/rest` are planned. See [Limits](#limits).
 :::
 
@@ -122,6 +123,7 @@ await Product.unscoped.count()                                    // every store
 | `to` | `TENANTS.MODEL` | The tenant model, or a thunk such as `() => Store`. |
 | `relatedName` | Django's default (`productSet`) | Reverse accessor on the tenant model; `'+'` hides it. |
 | `uuidPk` | `false` | Add `id: UUIDField({ primaryKey: true, default: uuid7 })`. |
+| `extends` | none | An abstract model to inherit, such as `AbstractBaseUser`. Its `objects` manager class is kept and scoped. |
 
 `TenantModel` is a ready-made factory with `field: 'tenant'` and the target taken from
 `TENANTS.MODEL`.
@@ -129,6 +131,74 @@ await Product.unscoped.count()                                    // every store
 Start every index and unique constraint with the tenant field
 (`uniqueTogether: [['store', 'handle']]`): uniqueness is usually per tenant, and the index then
 serves the tenant filter too.
+
+### Per-tenant users
+
+A shop's customers belong to one store, so they are a tenant-scoped model rather than
+`AUTH_USER_MODEL` (which stays your platform's staff and merchants). Build them with
+`extends: AbstractBaseUser` to get passwords, and give them their own JWT classes through
+`@ghuri/auth`'s `userModel()` hook:
+
+```ts title="src/customers/models.ts"
+import { AbstractBaseUser, AccessToken, RefreshToken } from '@ghuri/auth'
+import { JWTAuthentication } from '@ghuri/auth/rest'
+import { BooleanField, EmailField } from '@ghuri/orm'
+import { tenantModel } from '@ghuri/tenants'
+import { Store } from '../stores/models'
+
+const CustomerModel = tenantModel({ field: 'store', to: () => Store, uuidPk: true, extends: AbstractBaseUser })
+
+export class Customer extends CustomerModel({
+  email: new EmailField(),
+  isActive: new BooleanField({ default: true }),
+}) {
+  static Meta = { uniqueTogether: [['store', 'email']] }
+  static USERNAME_FIELD = 'email'
+}
+
+export class CustomerAccessToken extends AccessToken {
+  static tokenType = 'customer_access'
+  static userModel() { return Customer }
+}
+
+export class CustomerRefreshToken extends RefreshToken {
+  static tokenType = 'customer_refresh'
+  static accessTokenClass = CustomerAccessToken
+  static userModel() { return Customer }
+}
+
+export class CustomerJWTAuthentication extends JWTAuthentication {
+  tokenClasses = [CustomerAccessToken]
+}
+```
+
+`Customer.objects` is a scoped `UserManager`, so looking up an email finds it in the request's
+store only. Tokens are read back through the same scoped manager, so a customer token issued by
+one store is rejected on another, and the separate `tokenType` means a customer token is never
+accepted as a platform-user token, or the other way round.
+
+`TokenObtainPairView` authenticates `AUTH_USER_MODEL`, so customers log in through a small view of
+your own:
+
+```ts title="src/customers/views.ts"
+import type { Context } from 'hono'
+import { Customer, CustomerRefreshToken } from './models'
+
+export async function customerLogin(c: Context) {
+  const { email, password } = await c.req.json()
+  const customer = await Customer.objects.filter({ email }).first() // this store only
+  if (!customer || !customer.isActive || !(await customer.checkPassword(password))) {
+    return c.json({ detail: 'No active account found with the given credentials' }, 401)
+  }
+  const refresh = await CustomerRefreshToken.forUser(customer)
+  return c.json({ refresh: await refresh.encode(), access: await refresh.accessToken.encode() })
+}
+```
+
+For refresh and logout, use `TokenRefreshView` and `TokenBlacklistView` with
+`tokenClass = CustomerRefreshToken`, and put `CustomerJWTAuthentication` in the
+`authenticationClasses` of the customer-facing viewsets. See
+[Tokens and JWT](/docs/topics/auth-tokens/).
 
 ## The current tenant
 
@@ -174,6 +244,24 @@ export class CatalogConfig extends AppConfig {
 Keep `withoutTenant()` and `unscoped` for platform code, such as billing jobs, data migrations
 and staff dashboards.
 
+### Taking the tenant along
+
+`@ghuri/tenants` registers a [context carrier](/docs/topics/background-tasks/#taking-request-context-along)
+named `tenant`, so work that leaves the request can carry the tenant without passing store ids around:
+
+```ts
+import { captureContext, restoreContext } from '@ghuri/core'
+
+await env.INVENTORY.send({ sku, context: captureContext() })   // { tenant: '<store pk>' }
+
+// consumer
+await restoreContext(msg.body.context, () => syncInventory(msg.body.sku))   // runs as that store
+```
+
+`restoreContext()` loads the tenant and runs the work inside `runAsTenant()`; it throws `TenantNotFound`
+when the tenant was deleted. `withoutTenant()` is not carried: restored work runs with no tenant and fails
+closed. Queued agent runs (`agent.enqueue()`) use this automatically.
+
 ## Finding the tenant of a request
 
 `TenantMiddleware` tries `TENANTS.RESOLVERS` in order and stops at the first one that returns a
@@ -189,6 +277,17 @@ resolver), or throws `TenantNotFound`, which answers 404.
 
 Every resolver also takes `filter` (for example `{ isActive: true }`, so inactive tenants answer
 404) and `model` (default `TENANTS.MODEL`).
+
+`SubdomainResolver` and `HostResolver` read the host with `requestHost(c)`: the same host the
+CSRF and `ALLOWED_HOSTS` checks use, lower-cased, without the port or a trailing dot. That is the
+host of the request URL, which Workers and `@ghuri/core/node` take from the `Host` header.
+`X-Forwarded-Host` is used only when `USE_X_FORWARDED_HOST` is `true`, as in Django. Set it only
+behind a proxy that overwrites the header, or any client could choose its tenant.
+
+:::note[Changed in 0.1.0-alpha.2]
+Before `0.1.0-alpha.2` the host resolvers trusted `X-Forwarded-Host` unconditionally. If your proxy
+sets it and you relied on that, set `USE_X_FORWARDED_HOST: true`.
+:::
 
 When no resolver finds a tenant, the request runs without one, so platform routes such as signup
 or a marketing page keep working. Set `TENANTS.REQUIRED: true`, or use
@@ -209,7 +308,7 @@ With a tenant active:
 |---|---|
 | Reads (`fetch`, `get`, `count`, `exists`, `aggregate`, `values`, iteration) | `WHERE <tenant> = <current>` is added. |
 | Subqueries (`filter({ pk__in: Product.objects.values('id') })`) | Scoped the same way. |
-| Reverse relations, many-to-many managers, GraphQL | Scoped, because they read through `objects`. |
+| Reverse relations, many-to-many managers, GraphQL, REST viewsets, agent tools | Scoped, because they read through `objects`. |
 | `save()`, `create()` | Fill an empty tenant; refuse another tenant's object, and an explicit key that names another tenant's row. |
 | Foreign keys to tenant-scoped models | Must point to the same tenant (checked on `save`, `create`, `bulkCreate`, `bulkUpdate` and `update`). |
 | `update(values)` | Scoped; refuses changing the tenant or pointing foreign keys at another tenant. |
@@ -218,9 +317,10 @@ With a tenant active:
 | `delete()` | Scoped; cascades follow the same-tenant foreign keys. |
 | Many-to-many `add()` | Both sides must belong to the current tenant. |
 
-A refused write throws `CrossTenantError`. With **no** tenant (and outside `withoutTenant()`),
-any query or write on a tenant-scoped model throws `TenantNotSet`, and a tenant QuerySet used as a
-subquery matches nothing.
+A refused write throws `CrossTenantError`, a `PermissionDenied`, so a client gets HTTP 403. With
+**no** tenant (and outside `withoutTenant()`), any query or write on a tenant-scoped model throws
+`TenantNotSet`, and a tenant QuerySet used as a subquery matches nothing. `TenantNotSet` reaches
+clients as a 500, because it means code ran without a tenant where one was required.
 
 The tenant filter is added when a QuerySet runs, not when it is built. So
 `static queryset = Product.objects.all()` on a viewset is safe at import time and is scoped to
@@ -246,15 +346,48 @@ await cache.getOrSet('menu', () => buildMenu(), 300)
 With `uuidPk: true`, primary keys are unique across databases, so a tenant can later move to a
 database of its own without key clashes.
 
-## GraphQL and REST
+Ids made by one process (a Worker isolate or a Node process) are strictly increasing, even within
+one millisecond, so `orderBy('id')` keeps insertion order for rows created together, such as the
+lines of an order. Ids from different processes are ordered by time only. `uuid7Time()` can be
+slightly ahead of the wall clock after the system clock steps back.
 
-[`@ghuri/graphql`](/docs/topics/graphql/) reads through each model's default manager, so root
-fields, connections, relations and `node(id:)` are scoped with no per-type code. Another tenant's
-`node(id:)` resolves to `null`.
+## GraphQL, REST and agents
 
-[REST](/docs/topics/rest/) generic views and viewsets evaluate `queryset.all()` on every request,
-so they are scoped the same way. That path is not covered by the package's own tests yet, so add
-a [leak test](#testing-for-leaks) for your API.
+GraphQL, REST and agents all read through each model's default manager, so they are scoped with
+no per-type code:
+
+- [`@ghuri/graphql`](/docs/topics/graphql/): root fields, connections, relations and `node(id:)`.
+  Another tenant's `node(id:)` resolves to `null`.
+- [`@ghuri/rest`](/docs/topics/rest/): viewsets, including `queryset = Product.objects.all()` set
+  at import time. Another tenant's object is a 404, and a serializer foreign key that names another
+  tenant's row fails validation with a 400, because related fields look rows up through the scoped
+  `objects` too.
+- [`@ghuri/agents`](/docs/topics/agents/): `ModelTools` run as the current tenant. The MCP endpoint
+  runs them inside the request, after `TenantMiddleware`, and queued runs (`enqueue()`) run as the tenant
+  that enqueued them. Conversations belong to their user; to scope them to the tenant as well, use
+  a tenant-scoped conversation model (below).
+
+### Agent conversations
+
+A user who belongs to two stores would see both stores' agent conversations, because the built-in
+`agents.Conversation` only knows its user. Swap it for a tenant-scoped model with
+`AGENTS.CONVERSATION_MODEL`:
+
+```ts
+import { conversationFields } from '@ghuri/agents'
+
+export class Conversation extends StoreModel({ ...conversationFields }) {
+  static Meta = { ordering: ['-updatedAt'] }
+}
+
+// settings
+AGENTS: { CONVERSATION_MODEL: 'stores.Conversation' },
+```
+
+The chat, conversation list and detail endpoints then read through the scoped `objects`: another
+store's conversation is a 404, also for its owner, and new conversations get the current store.
+Projects that already have conversations need a short migration; see
+[Your own conversation model](/docs/topics/agents/#your-own-conversation-model).
 
 ## Testing for leaks
 
@@ -277,7 +410,12 @@ it('never leaks between stores', async () => {
 ```
 
 To run ordinary test code as a tenant, wrap it in `runAsTenant()` or call `activateTenant(store)`
-in `beforeEach` and the returned `restore()` in `afterEach`. See [Testing](/docs/topics/testing/).
+in `beforeEach` and the returned `restore()` in `afterEach`.
+
+To send a request as a tenant through the [test client](/docs/topics/testing/#the-test-client),
+put the host in the URL (`client.get('http://amarshop.myshop.example/products/')`) or in the
+client's `baseUrl`, not in a `Host` header, and include it in `ALLOWED_HOSTS` if you restrict
+them. Header resolvers work with an ordinary header.
 
 ## Limits
 

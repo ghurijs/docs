@@ -142,6 +142,7 @@ prefer `blank: true, default: ''` to `null: true`, so there is only one "empty" 
 | `appLabel` | Override the app the model belongs to. |
 | `managed` | `false` means Ghuri never creates, alters or flushes the table (migrations still track the model's state). Default `true`. |
 | `defaultManagerName` | Manager used by related lookups and internals. Default `objects`. |
+| `swappable` | Name of the setting that can replace this model, like `auth.User`'s `'AUTH_USER_MODEL'`. See [Swappable models](#swappable-models). |
 
 Indexes are `{ fields, name?, unique?, condition? }`, where `condition` is a raw SQL `WHERE`
 clause for a partial index and a leading `-` in `fields` makes that column descending.
@@ -213,6 +214,45 @@ export class Page extends Model(
 `Page` gets `createdAt` and `updatedAt` and its own table; `Timestamped` has no table. You can
 also spread fields: `Model({ ...Timestamped.fields, title: ... })`. Multi-table inheritance and
 proxy models are not supported in 0.1.
+
+## Swappable models
+
+A reusable app can let projects replace one of its models, the way `AUTH_USER_MODEL` replaces
+`auth.User`. The model names a setting in `Meta.swappable`; a dotted name reads a nested setting:
+
+```ts
+export class Conversation extends Model({ ...conversationFields }) {
+  static Meta = { appLabel: 'agents', swappable: 'AGENTS.CONVERSATION_MODEL' }
+}
+```
+
+While the setting is unset (or names the model itself), nothing changes. When it names another
+model (`AGENTS: { CONVERSATION_MODEL: 'shop.Conversation' }`), the built-in model is *swapped*:
+
+- `Conversation._meta.swapped` is `'shop.Conversation'` (otherwise `undefined`).
+- It is not installed: `apps.getModels()` and the migration autodetector skip it, and it gets no
+  table. Its migration operations are skipped too (see
+  [Swappable models in migrations](/docs/topics/migrations/#swappable-models-in-migrations)).
+- Its managers throw `Manager isn't available; 'agents.Conversation' has been swapped for
+  'shop.Conversation'`, and its relations are not reverse relations of their targets.
+
+Code that should follow the setting asks for the model instead of importing it:
+
+```ts
+import { getSwappableModel } from '@ghuri/orm'
+
+const Conversation = getSwappableModel('AGENTS.CONVERSATION_MODEL', 'agents.Conversation')
+new ForeignKey(() => getSwappableModel('AGENTS.CONVERSATION_MODEL', 'agents.Conversation'), { … })
+```
+
+`getSwappableModel(setting, default)` throws `ImproperlyConfigured` when the setting is not
+`'app_label.ModelName'` or names a model that is not installed. Packages usually wrap it, like
+`getUserModel()` in `@ghuri/auth` and `getConversationModel()` in `@ghuri/agents`.
+
+Set a swappable setting before the first `migrate`. The replacement must not be created in a
+migration that depends on the app it replaces. Changing it on a database that already has the
+tables needs a hand-written migration; see the agents example in
+[Your own conversation model](/docs/topics/agents/#your-own-conversation-model).
 
 ## Managers
 

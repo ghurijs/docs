@@ -79,10 +79,50 @@ For Workers AI, add the binding to `wrangler.jsonc`:
 | `AUTHENTICATION_CLASSES` | `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES` | Authentication for the chat and MCP endpoints |
 | `PERMISSION_CLASSES` | `[IsAuthenticated]` | Access to agents and the MCP endpoint when an agent sets no `permissionClasses` |
 | `QUEUE_BINDING` | `'AGENTS_QUEUE'` | Queue producer binding used by `enqueue()` |
+| `TRACE_RUNS` | `false` | Save one `Run` row per agent run (see [Run traces](#run-traces)). `{ messages: true }` also stores prompts and answers |
+| `CONVERSATION_MODEL` | `'agents.Conversation'` | The conversation model, `'app_label.ModelName'` (see [Your own conversation model](#your-own-conversation-model)) |
 
 Without `PROVIDERS` keys, `anthropic:` and `openai:` models fall back to the `ANTHROPIC_API_KEY`
 and `OPENAI_API_KEY` environment variables. Add other providers with
 `registerProvider(name, factory)`.
+
+### Provider headers and gateways
+
+`PROVIDERS[name].headers` adds HTTP headers to every call to that provider. It can be an object, or a
+function called once per run with the provider context, whose `run` names the agent, the user and the
+carried request context (`{ tenant: '42' }` with [`@ghuri/tenants`](/docs/topics/multi-tenancy/)):
+
+```ts
+PROVIDERS: {
+  anthropic: {
+    apiKey: env.ANTHROPIC_API_KEY,
+    baseURL: 'https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic',
+    headers: ({ run }) => ({ 'cf-aig-metadata': JSON.stringify({ agent: run?.agent, tenant: run?.carried.tenant }) }),
+  },
+},
+```
+
+Custom factories registered with `registerProvider()` receive the same `run` (absent when
+`resolveModel()` is called outside an agent run).
+
+The built-in **`ghuri-ai:`** provider talks to a ghuri-ai model gateway. Set its URL and key with
+`PROVIDERS['ghuri-ai']: { baseURL, apiKey }` or the `GHURI_AI_URL` and `GHURI_AI_API_KEY` environment
+variables:
+
+| Model | Sent to |
+|---|---|
+| `ghuri-ai:<alias>` (`ghuri-ai:fast`, `ghuri-ai:smart`) | `<baseURL>/v1/chat/completions` (OpenAI-compatible; needs `@ai-sdk/openai`) |
+| `ghuri-ai:anthropic/<model>` | `<baseURL>/v1/anthropic/messages` with the Anthropic SDK (`@ai-sdk/anthropic`), so `providerOptions` such as prompt caching keep working |
+| `ghuri-ai:openai/<model>` | `<baseURL>/v1/openai/…` with the OpenAI SDK |
+
+Every call carries `x-ghuri-agent`, `x-ghuri-user` (signed-in users only) and one `x-ghuri-<name>` header
+per carried context value (`x-ghuri-tenant`), for metering and budgets. Headers you configure win over
+these.
+
+When the provider or gateway refuses a call, the chat endpoint answers **429** (with `Retry-After`) for
+rate limits and spending caps, and **503** for a bad API key or a billing problem (401, 402, 403 from the
+provider). `modelCallError(err)` applies the same mapping in your own views. Streamed responses have
+already started with 200, so these errors arrive as an `error` chunk in the stream instead.
 
 ## Defining an agent
 
@@ -304,7 +344,30 @@ const { conversationId } = await agents.create('editor').enqueue('Summarize my w
 
 The consumer reloads the user, runs the agent and stores the result in the conversation, which
 is created up front so that you can poll `GET …/conversations/<id>/`. Failed runs are retried by
-the queue. See also [Background tasks](/docs/topics/background-tasks/).
+the queue. `enqueue()` also takes the request context along (`captureContext()` from `@ghuri/core`):
+with `@ghuri/tenants`, the queued run happens as the tenant that enqueued it, so its tools see that
+tenant's rows. See also [Background tasks](/docs/topics/background-tasks/).
+
+## Run traces
+
+Every run (`run()`, `stream()` once the stream ends, queued runs) sends the `runFinished` signal, with
+the agent, its run context, the model (`'provider:model-id'`), the result or the error, and the duration.
+Receivers that throw are logged and never fail the run:
+
+```ts
+import { runFinished } from '@ghuri/agents'
+
+runFinished.connect(async ({ model, result, context }) => {
+  if (result) console.log(context.agentName, model, result.usage.inputTokens, result.usage.outputTokens)
+})
+```
+
+With `AGENTS.TRACE_RUNS: true`, each run is also saved as a `Run` (table `agents_run`, migration
+`agents.0002_run`): agent, model, conversation, user, status (`ok` / `error`), finish reason, steps, input,
+output and cached input tokens, the provider's usage object, tool calls (names and inputs), the carried
+context (`{ tenant }`), the error message and the duration. `TRACE_RUNS: { messages: true }` also stores the
+run's messages, which contain prompts and answers: decide how long to keep them. A trace that can't be
+saved (for example before `ghuri migrate`) logs one warning and never fails the run.
 
 ## Conversation memory
 
@@ -314,6 +377,71 @@ their inputs, tool results and errors). Passing `conversationId` loads the histo
 Conversations belong to their user: another user's id fails with `ConversationNotFound` (404 over
 HTTP). `loadMessages()`, `saveMessages()` and `createConversation()` are exported for custom
 flows.
+
+### Your own conversation model
+
+`Conversation` is swappable, like `auth.User`: point `AGENTS.CONVERSATION_MODEL` at your own model
+built from `conversationFields` (or `extends: AbstractConversation`). The usual reason is
+multi-tenancy, so that a user who belongs to two stores only sees the current store's
+conversations:
+
+```ts title="src/stores/models.ts"
+import { conversationFields } from '@ghuri/agents'
+
+export class Conversation extends StoreModel({ ...conversationFields }) {
+  static Meta = { ordering: ['-updatedAt'] }
+}
+```
+
+```ts title="src/settings.ts"
+AGENTS: { CONVERSATION_MODEL: 'stores.Conversation' },
+```
+
+`getConversation()`, `createConversation()`, `saveMessages()`, the conversation list and detail
+views, `Message.conversation` and `Run.conversation` all use the model the setting names
+(`getConversationModel()` returns it). With a [tenant-scoped](/docs/topics/multi-tenancy/) model,
+another store's conversation is a 404 and new conversations get the current store. Messages are
+not scoped themselves: they are reached through their conversation. `agents.Conversation` then has
+no table, and its manager throws.
+
+Projects that don't set `CONVERSATION_MODEL` see no change.
+
+:::caution[Swapping in a project that already has conversations]
+Set `CONVERSATION_MODEL` before the first `migrate` when you can. On a database where
+`agents_conversation` already exists (with rows, and `agents_message` / `agents_run` pointing at
+it), let your model adopt that table instead of creating a new one:
+
+1. Give the model `Meta.dbTable: 'agents_conversation'`, set `CONVERSATION_MODEL`, and run
+   `ghuri makemigrations stores`.
+2. Edit the generated migration: add `managed: false` to the `CreateModel` options and follow it
+   with an `AlterModelOptions` (state only), then a `RunCode` that adds the store column to the
+   existing table, or creates the table on a new database (tests, new environments):
+
+```ts title="src/stores/migrations/0007_conversation.ts"
+ops.CreateModel({
+  name: 'Conversation',
+  fields: { /* as generated */ },
+  options: { dbTable: 'agents_conversation', ordering: ['-updatedAt'], managed: false },
+}),
+ops.AlterModelOptions({ name: 'Conversation', options: { ordering: ['-updatedAt'] } }),
+ops.RunCode(async (apps, conn, { editor, using }) => {
+  const Conversation = apps.getModel('stores', 'Conversation')
+  if (!(await editor.tableNames()).includes('agents_conversation')) {
+    await editor.createModel(Conversation) // a new database
+    return
+  }
+  // existing conversations: every row needs a store
+  const store = await apps.getModel('stores', 'Store').objects.using(using).orderBy('createdAt').first()
+  await editor.addField(Conversation, Conversation._meta.getField('store'), { default: store?.pk })
+  // optionally move rows to the right store here, e.g. from the user's store membership
+}, ops.RunCode.noop),
+```
+
+3. Keep the migration free of dependencies on `agents`, and run `ghuri migrate` then
+   `ghuri makemigrations --check`. Existing conversations keep their ids, messages and run traces.
+
+Going back to `agents.Conversation` later needs the reverse by hand.
+:::
 
 ## MCP
 

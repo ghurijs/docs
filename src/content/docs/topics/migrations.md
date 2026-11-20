@@ -186,6 +186,39 @@ The second argument is the `Connection`, for raw SQL inside the same migration
 (`await conn.execute('UPDATE ...')`), and the third carries the database alias (`using`) being
 migrated. Pass `using` on to queries so the migration works with `--database`.
 
+## Swappable models in migrations
+
+Relations to a [swappable model](/docs/topics/models/#swappable-models) are written through its
+setting, so a reusable app's migrations work whichever model the project picked (Django's
+`settings.AUTH_USER_MODEL` and `swappable_dependency()`):
+
+```ts
+import { Migration, operations as ops, swappableDependency, swappableModel } from '@ghuri/orm/migrations'
+
+export default new Migration({
+  dependencies: [['blog', '0001_initial'], swappableDependency('AUTH_USER_MODEL', 'auth.User')],
+  operations: [
+    ops.AddField({
+      modelName: 'Post',
+      name: 'editor',
+      field: { type: 'ForeignKey', to: swappableModel('AUTH_USER_MODEL', 'auth.User'), onDelete: 'CASCADE' },
+    }),
+  ],
+})
+```
+
+- `makemigrations` writes these for every relation to a model named by a swappable setting
+  (`auth.User`, or your user model when `AUTH_USER_MODEL` points at it). Existing migrations that
+  name the model directly keep working.
+- `swappableModel(setting, default)` reads as the label the setting names when the migration runs.
+- `swappableDependency(setting, default)` depends on the migration that creates that model (else on
+  the first migration of its app, Django's `__first__`). It is ignored when it names the
+  migration's own app, it falls back to `__first__` when the creating migration itself depends on
+  this one, and an already applied migration is not reported as an inconsistent history because of it.
+- A `CreateModel` with `options.swappable` (written for models with `Meta.swappable`) is skipped
+  when the setting names another model, together with every later operation on that model, so the
+  swapped model gets no table.
+
 ## Dialects: D1, SQLite and Postgres
 
 Operations are dialect-neutral; a schema editor per dialect turns them into SQL.
