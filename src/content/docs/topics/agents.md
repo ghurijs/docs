@@ -451,6 +451,82 @@ uses your REST authentication classes (a token is the practical choice); there i
 Endpoint options, supported protocol versions and client configuration for Claude Desktop and
 Claude Code are on the [MCP server](/docs/topics/agents-mcp/) page.
 
+## Evaluating agents
+
+Tests check that the code works; evals check that the **model** does the job well enough. An eval suite is a
+list of real tasks with checks, run against one or more models, so you can see whether a cheap model handles
+your tools as well as an expensive one, and catch regressions when you change instructions or tools.
+
+```ts title="src/blog/support.eval.ts"
+import { answerMatches, calledTool, defineEval, formatEvalReport, judge, maxSteps, noToolErrors,
+  notCalledTool, runEval } from '@ghuri/agents/evals'
+
+export const supportEval = defineEval({
+  name: 'support',
+  agent: SupportAgent,
+  models: ['anthropic:claude-haiku-5-5', 'anthropic:claude-opus-5-5'],
+  judgeModel: 'anthropic:claude-opus-5-5',
+  prices: {                                     // US dollars per million tokens, for the cost columns
+    'anthropic:claude-haiku-5-5': { input: 0.1, output: 0.5 },
+    'anthropic:claude-opus-5-5': { input: 4, output: 20, cachedInput: 0.2 },
+  },
+  async setup() {                               // runs before every attempt, after beforeEach
+    const editor = await makeEditorWithPosts()
+    return { user: editor }                     // run options: the user the tools act as
+  },
+  cases: [
+    {
+      name: 'finds a post',
+      input: 'Which posts mention Workers?',
+      checks: [
+        calledTool('posts_list', { search: /workers/i }),
+        notCalledTool('posts_destroy'),
+        noToolErrors(),
+        answerMatches('Agents on Workers'),
+        maxSteps(4),
+        judge('Lists the matching posts by title and does not invent posts.'),
+      ],
+    },
+  ],
+})
+
+it('support agent eval', async () => {
+  const report = await runEval(supportEval, { beforeEach: () => db.flush() })
+  console.log(formatEvalReport(report))
+  expect(report.byModel['anthropic:claude-haiku-5-5'].passRate).toBeGreaterThanOrEqual(0.9)
+})
+```
+
+Set up the app and a test database in `beforeAll`, as in your tests, so tool calls never touch real data.
+Run the suites with [`npx ghuri eval`](/docs/reference/cli/#eval). Example output (illustrative numbers):
+
+```text
+Eval: support
+model                       pass  rate  in tok  out tok     cost  $/pass  avg s
+anthropic:claude-haiku-5-5  18/20   90%   61234     4120  $0.0082  $0.0005    2.1
+anthropic:claude-opus-5-5   20/20  100%   60877     3906  $0.3216  $0.0161    4.8
+```
+
+| Check | Passes when |
+|---|---|
+| `calledTool(name, input?, { times? })` | the tool was called without an error; `input` is matched partially (`RegExp` for strings, functions as predicates) |
+| `notCalledTool(name)` | the tool was never called |
+| `noToolErrors()` | no tool call failed (permission, validation, not found) |
+| `answerMatches(text \| RegExp)` | the final answer contains the text (case-insensitive) or matches |
+| `maxSteps(n)` | the run took at most `n` model steps |
+| `check(name, fn)` | `fn(ctx)` doesn't return `false` or throw: query the database, inspect `ctx.result` |
+| `judge(rubric, { model? })` | a judge model (the suite's `judgeModel`) says the run meets the rubric |
+
+Each attempt runs without conversation memory, one at a time. A run that fails (provider error, missing
+key) counts as a failed attempt and its error is reported. `runEval()` returns a report with a summary per
+model (`passed`, `total`, `passRate`, tokens, `cost`, `costPerPass`, `avgDurationMs`) and every attempt with
+its tool calls and failures. `--models`, `--repeat` and `--case` on `ghuri eval` override the suites
+(`GHURI_EVAL_MODELS`, `GHURI_EVAL_REPEAT`, `GHURI_EVAL_CASE`), and `--report <dir>` saves the reports as
+JSON.
+
+Prefer checks in code; use `judge()` for what code can't check, with a strong model as the judge. Run each
+case a few times (`repeat`) before trusting a pass rate: models don't answer the same way every time.
+
 ## Testing
 
 Use the AI SDK mock model; no network is needed:
