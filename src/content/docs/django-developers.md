@@ -387,9 +387,13 @@ Postgres, `atomic()` is a real transaction with savepoints for nested blocks. Se
 :::note[Migrations]
 `makemigrations` (including `--empty`, `--merge`, `--check`), `migrate` (including `--fake`,
 `--fake-initial`, `--plan`), `showmigrations`, `sqlmigrate` and `--database <alias>` all work.
-**`squashmigrations` and `inspectdb` do not exist yet**, and neither do swappable-dependency
-markers or changes to a model's primary key / auto field. Data migrations use
-`ops.RunCode(async (apps, conn, { using }) => {...})` instead of `RunPython`.
+**`squashmigrations` and `inspectdb` do not exist yet**, and neither do changes to a model's
+primary key / auto field. Data migrations use
+`ops.RunCode(async (apps, conn, { using }) => {...})` instead of `RunPython`. Swappable models:
+`to=settings.AUTH_USER_MODEL` is `to: swappableModel('AUTH_USER_MODEL', 'auth.User')` and
+`swappable_dependency()` is `swappableDependency()`; it depends on the migration that creates the
+model rather than always `__first__`. A swapped model is not returned by `apps.getModel()`, and
+`Meta.swappable` may name a nested setting (`'AGENTS.CONVERSATION_MODEL'`).
 :::
 
 :::note[Admin]

@@ -157,6 +157,31 @@ skip messages that are not its own, as `@ghuri/agents` does.
 `ready()` registers an `onQueue()` handler, and `agent.enqueue()` sends to the
 `AGENTS.QUEUE_BINDING` producer. See [AI agents and MCP](/docs/topics/agents/).
 
+### Taking request context along
+
+A queue message leaves the request, and with it any request-scoped state such as the current tenant.
+`captureContext()` records that state as a small JSON-safe object; `restoreContext(captured, fn)` runs
+`fn` with it active again:
+
+```ts
+import { captureContext, onQueue, restoreContext } from '@ghuri/core'
+
+await env.EMAILS.send({ orderId, context: captureContext() })
+
+onQueue<{ orderId: string; context?: Record<string, string> }>('emails', async (batch) => {
+  for (const msg of batch.messages) {
+    await restoreContext(msg.body.context, () => sendReceipt(msg.body.orderId))
+    msg.ack()
+  }
+})
+```
+
+What is captured comes from *context carriers* that packages register: `@ghuri/tenants` registers
+`tenant`. Register your own with `registerContextCarrier({ name, capture, restore })`, where `capture()`
+returns a string (or `undefined` for nothing to carry) and `restore(value, fn)` runs `fn` with it.
+Unknown keys and a missing object are ignored, so messages sent before a carrier existed still work.
+`agent.enqueue()` carries the context automatically.
+
 ## Running locally
 
 `npx ghuri runserver` runs `wrangler dev` for Cloudflare projects, which simulates queues

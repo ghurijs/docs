@@ -245,11 +245,13 @@ AGENTS: {
 |---|---|---|---|
 | `DEFAULT_MODEL` | `string \| LanguageModel` | none | Model used by agents that do not set `model`, as `provider:model` or an AI SDK model object. |
 | `AI_BINDING` | `string` | `'AI'` | Workers AI binding name for the `workers-ai` provider. |
-| `PROVIDERS` | `Record<string, { apiKey?, baseURL?, … }>` | `{}` | Credentials and options per provider (`anthropic`, `openai`, `workers-ai`, …). |
+| `PROVIDERS` | `Record<string, { apiKey?, baseURL?, headers?, … }>` | `{}` | Credentials and options per provider (`anthropic`, `openai`, `workers-ai`, `ghuri-ai`, …). `headers` is an object or a function of the run. See [Provider headers and gateways](/docs/topics/agents/#provider-headers-and-gateways). |
 | `MAX_STEPS` | `number` | `10` | Maximum tool-call steps per agent run. |
 | `AUTHENTICATION_CLASSES` | `AuthenticationClass[]` | `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES` | Authentication for the chat and MCP endpoints. |
 | `PERMISSION_CLASSES` | `PermissionClass[]` | `[IsAuthenticated]` | Permissions for agents that do not set `permissionClasses`. |
 | `QUEUE_BINDING` | `string` | `'AGENTS_QUEUE'` | Queue producer binding used by `agent.enqueue()`. See [Background tasks](/docs/topics/background-tasks/). |
+| `TRACE_RUNS` | `boolean \| { messages?: boolean }` | `false` | Save a `Run` row per agent run (model, usage, tool calls, outcome, duration); `{ messages: true }` also stores prompts and answers. See [Run traces](/docs/topics/agents/#run-traces). |
+| `CONVERSATION_MODEL` | `string` | `'agents.Conversation'` | The conversation model (swappable, like `AUTH_USER_MODEL`), e.g. a tenant-scoped one. Set it before the first `migrate`. See [Your own conversation model](/docs/topics/agents/#your-own-conversation-model). |
 
 See [AI agents and MCP](/docs/topics/agents/).
 
