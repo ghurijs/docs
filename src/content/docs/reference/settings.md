@@ -251,6 +251,7 @@ AGENTS: {
 | `PERMISSION_CLASSES` | `PermissionClass[]` | `[IsAuthenticated]` | Permissions for agents that do not set `permissionClasses`. |
 | `QUEUE_BINDING` | `string` | `'AGENTS_QUEUE'` | Queue producer binding used by `agent.enqueue()`. See [Background tasks](/docs/topics/background-tasks/). |
 | `TRACE_RUNS` | `boolean \| { messages?: boolean }` | `false` | Save a `Run` row per agent run (model, usage, tool calls, outcome, duration); `{ messages: true }` also stores prompts and answers. See [Run traces](/docs/topics/agents/#run-traces). |
+| `STRICT_TOOL_INPUT` | `boolean` | `false` | Check tool arguments against their schemas before tools run, for agents that don't set `strictToolInput`. See [Shaping tools](/docs/topics/agents/#shaping-tools-for-smaller-models). |
 | `CONVERSATION_MODEL` | `string` | `'agents.Conversation'` | The conversation model (swappable, like `AUTH_USER_MODEL`), e.g. a tenant-scoped one. Set it before the first `migrate`. See [Your own conversation model](/docs/topics/agents/#your-own-conversation-model). |
 
 See [AI agents and MCP](/docs/topics/agents/).

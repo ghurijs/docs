@@ -80,6 +80,7 @@ For Workers AI, add the binding to `wrangler.jsonc`:
 | `PERMISSION_CLASSES` | `[IsAuthenticated]` | Access to agents and the MCP endpoint when an agent sets no `permissionClasses` |
 | `QUEUE_BINDING` | `'AGENTS_QUEUE'` | Queue producer binding used by `enqueue()` |
 | `TRACE_RUNS` | `false` | Save one `Run` row per agent run (see [Run traces](#run-traces)). `{ messages: true }` also stores prompts and answers |
+| `STRICT_TOOL_INPUT` | `false` | Check tool arguments before tools run, for agents that don't set `strictToolInput` (see [Shaping tools](#shaping-tools-for-smaller-models)) |
 | `CONVERSATION_MODEL` | `'agents.Conversation'` | The conversation model, `'app_label.ModelName'` (see [Your own conversation model](#your-own-conversation-model)) |
 
 Without `PROVIDERS` keys, `anthropic:` and `openai:` models fall back to the `ANTHROPIC_API_KEY`
@@ -251,6 +252,63 @@ method of the same name, or put a standalone `tool({ name, description, execute 
 Throw `ToolError` for failures the model should see. Permission, not-found and validation errors
 raised by Ghuri are shown to the model too. Other exceptions are reported as "The tool failed
 with an internal error." (the real message only with `DEBUG`) and logged.
+
+## Shaping tools for smaller models
+
+A small model such as Claude Haiku can do most of what a large one does with your tools, if the tools are
+easy to choose from and easy to call. Every option below is off by default; measure each change with an
+[eval](#evaluating-agents).
+
+**Load tools on demand.** With many tools, every request carries every schema, and a small model has more to
+choose from. `toolSearch` sends only the tools you name in `alwaysLoaded`, plus `find_tools`. The model calls
+`find_tools` with what it needs to do (or exact names) and the matching tools are loaded from its next step on,
+and for the rest of the conversation:
+
+```ts
+class StoreAgent extends Agent {
+  tools = [productTools, orderTools, themeTools]            // 50 tools
+  toolSearch = { alwaysLoaded: ['products_list', 'orders_list'], maxResults: 5 }
+}
+```
+
+`find_tools`' description lists the names of every tool it can load, and a line is added to the instructions
+telling the model to use it. Loading a tool changes the tool list for later requests, which restarts prompt
+caching after that point, so put the tools nearly every conversation needs in `alwaysLoaded`.
+
+**Check arguments before tools run.** `strictToolInput = true` (or `AGENTS.STRICT_TOOL_INPUT`) checks the
+arguments against the tool's schema first. Unknown arguments, missing required ones, values outside an `enum`
+and wrong types come back as one message the model can act on: `Invalid arguments for orders_list: unknown
+argument 'colour' (allowed: status, page, pageSize); 'page' must be integer (got two).` Without it, unknown
+arguments are ignored and bad values fail later, less clearly. Numeric strings count as numbers, and nested
+objects are left to the tool's own validation.
+
+**Return less.** `resultFields` keeps only the fields the model needs (per action, `'*'` for the rest), and
+`compact` leaves out `null`, empty strings and empty lists. Shorter results cost fewer tokens on every later
+step of the run:
+
+```ts
+new ModelTools(Product, {
+  actions: ['list', 'retrieve', 'update'],
+  resultFields: { list: ['id', 'title', 'status', 'price'] },
+  compact: true,
+})
+new RouterTools(router, { resultFields: { orders: { list: ['id', 'number', 'status'] } }, compact: true })
+```
+
+**Show an example.** `examples` (on `tool()`, `@tool`, or per action on `ModelTools` / `ViewSetTools`) adds
+`Example input: {...}` lines to the description, for agents and MCP clients alike:
+
+```ts
+@tool({
+  description: 'Set the price of a product variant.',
+  input: z.object({ variantId: z.string(), price: z.string().describe('Decimal string, e.g. "1250.00".') }),
+  examples: [{ variantId: '018f…', price: '1250.00' }],
+})
+```
+
+**Measure the tools.** `toolReport(agent)` from `@ghuri/agents/evals` lists each tool's description and schema
+size, a rough token count, and the arguments that have no description; `formatToolReport()` prints it, largest
+first, with the total every request pays.
 
 ## Exposing agents over HTTP
 
