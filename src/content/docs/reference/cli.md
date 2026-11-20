@@ -166,6 +166,19 @@ npx ghuri test [--watch] [vitest arguments]
 Runs `vitest run` in the project (`--watch` for watch mode). Other arguments go to vitest, for
 example `npx ghuri test src/blog`. See [Testing](/docs/topics/testing/).
 
+### `eval`
+
+```sh
+npx ghuri eval [--models <list>] [--repeat <n>] [--case <text>] [--report <dir>] [vitest arguments]
+```
+
+Runs the agent eval suites (`src/**/evals.ts`, `src/**/*.eval.ts`, `evals/**/*.eval.ts`) with vitest, one file
+at a time, using the project's vitest config. `ghuri test` does not run these files. `--models` compares the
+given models instead of the suites' own (comma separated), `--repeat` runs each case several times, `--case`
+keeps only cases whose name contains the text and `--report` also writes one JSON report per suite. Evals call
+real models unless the suites use mocks, so they cost money. See
+[Evaluating agents](/docs/topics/agents/#evaluating-agents).
+
 ### `deploy`
 
 ```sh
