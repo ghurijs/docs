@@ -78,7 +78,9 @@ For Workers AI, add the binding to `wrangler.jsonc`:
 | `MAX_STEPS` | `10` | Tool-call round trips per run |
 | `AUTHENTICATION_CLASSES` | `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES` | Authentication for the chat and MCP endpoints |
 | `PERMISSION_CLASSES` | `[IsAuthenticated]` | Access to agents and the MCP endpoint when an agent sets no `permissionClasses` |
-| `QUEUE_BINDING` | `'AGENTS_QUEUE'` | Queue producer binding used by `enqueue()` |
+| `ENQUEUE` | `'tasks'` with `@ghuri/tasks`, else `'queue'` | How `enqueue()` runs agents in the background (see [Background runs](#background-runs)) |
+| `TASK` | `{}` | `'tasks'` mode: the `agents.run` task's `backend`, `queueName` and `priority` |
+| `QUEUE_BINDING` | `'AGENTS_QUEUE'` | `'queue'` mode: Queue producer binding used by `enqueue()`. Setting it selects `'queue'` mode |
 | `TRACE_RUNS` | `false` | Save one `Run` row per agent run (see [Run traces](#run-traces)). `{ messages: true }` also stores prompts and answers |
 | `STRICT_TOOL_INPUT` | `false` | Check tool arguments before tools run, for agents that don't set `strictToolInput` (see [Shaping tools](#shaping-tools-for-smaller-models)) |
 | `CONVERSATION_MODEL` | `'agents.Conversation'` | The conversation model, `'app_label.ModelName'` (see [Your own conversation model](#your-own-conversation-model)) |
@@ -391,20 +393,45 @@ Run options: `user`, `conversationId`, `signal`, `memory`, `checkPermissions` (c
 hooks). Hooks: `beforeRun(ctx)`, `onToolCall(call, ctx)` (throw a `ToolError` to refuse a call)
 and `afterRun(result, ctx)`.
 
-### Background runs on Queues
+### Background runs
+
+With [`@ghuri/tasks`](/docs/topics/tasks/) installed, `enqueue()` enqueues the `agents.run` task on
+your `TASKS` backend: Cloudflare Queues on Workers, the database with `npx ghuri db_worker` on Node,
+or in-process in development.
+
+```ts
+const { conversationId, taskResult } = await agents.create('editor').enqueue('Summarize my week', { user })
+
+// later, e.g. in a status endpoint
+await taskResult.refresh()
+if (taskResult.status === 'SUCCESSFUL') console.log(taskResult.returnValue.text)
+```
+
+The task reloads the user, runs the agent and stores the result in the conversation, which is
+created up front so that you can poll `GET …/conversations/<id>/`. A failing run is tried 3 times.
+Messages are saved only when a run finishes, so a retry does not duplicate them, but tools that
+ran before a model error run again. The worker finds the agent by the name it was registered with
+on an `AgentRouter`; for an agent you enqueue without a router, call
+`registerAgent('editor', EditorAgent)` in a module the worker loads. Route the task with
+`AGENTS.TASK`:
+
+```ts title="src/settings.ts"
+AGENTS: { TASK: { queueName: 'agents' } },
+TASKS: { default: cloudflareQueues({ queues: { default: 'TASKS_QUEUE', agents: 'AGENTS_TASKS_QUEUE' } }) },
+```
+
+Without `@ghuri/tasks`, or with `AGENTS.QUEUE_BINDING` set or `AGENTS.ENQUEUE: 'queue'`,
+`enqueue()` sends a job to a Cloudflare Queue that a consumer you register runs:
 
 ```ts
 // wrangler.jsonc: "queues": { "producers": [{ "binding": "AGENTS_QUEUE", "queue": "agents" }],
 //                            "consumers": [{ "queue": "agents" }] }
 agents.consumeQueue('agents')      // once, e.g. in an AppConfig.ready()
-const { conversationId } = await agents.create('editor').enqueue('Summarize my week', { user })
 ```
 
-The consumer reloads the user, runs the agent and stores the result in the conversation, which
-is created up front so that you can poll `GET …/conversations/<id>/`. Failed runs are retried by
-the queue. `enqueue()` also takes the request context along (`captureContext()` from `@ghuri/core`):
+Either way, `enqueue()` takes the request context along (`captureContext()` from `@ghuri/core`):
 with `@ghuri/tenants`, the queued run happens as the tenant that enqueued it, so its tools see that
-tenant's rows. See also [Background tasks](/docs/topics/background-tasks/).
+tenant's rows. See also [Cron triggers and queues](/docs/topics/background-tasks/).
 
 ## Run traces
 

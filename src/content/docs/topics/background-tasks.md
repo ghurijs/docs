@@ -159,9 +159,10 @@ are retried rather than silently dropped. If several apps share a queue, each ha
 skip messages that are not its own, as `@ghuri/agents` does.
 :::
 
-`@ghuri/agents` uses this to run agents in the background: `agents.consumeQueue('agents')` in a
-`ready()` registers an `onQueue()` handler, and `agent.enqueue()` sends to the
-`AGENTS.QUEUE_BINDING` producer. See [AI agents and MCP](/docs/topics/agents/).
+Without `@ghuri/tasks`, `@ghuri/agents` uses this to run agents in the background:
+`agents.consumeQueue('agents')` in a `ready()` registers an `onQueue()` handler, and
+`agent.enqueue()` sends to the `AGENTS.QUEUE_BINDING` producer. With `@ghuri/tasks` installed,
+`enqueue()` uses a task instead. See [AI agents and MCP](/docs/topics/agents/#background-runs).
 
 ### Taking request context along
 
