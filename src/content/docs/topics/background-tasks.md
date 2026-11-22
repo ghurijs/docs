@@ -9,6 +9,12 @@ call it on a schedule, and [Queues](https://developers.cloudflare.com/queues/), 
 batches of messages sent by your own code. `@ghuri/core` connects both to your apps with two
 functions, `onSchedule()` and `onQueue()`.
 
+:::note[Looking for task queues?]
+For Django-style background tasks — `task()`, `.enqueue()`, results, retries and periodic tasks on
+Queues, the database or in-process — use [`@ghuri/tasks`](/docs/topics/tasks/). This page covers
+the low-level hooks it is built on.
+:::
+
 :::tip[If you know Django]
 Django has no built-in scheduler or task queue; you reach for Celery beat, django-q or a system
 crontab calling a management command. On Cloudflare the platform provides the scheduler and the
@@ -196,9 +202,23 @@ curl "http://localhost:8787/__scheduled?cron=0+*+*+*+*"
 
 ## On Node
 
-Node has no Cron Triggers or Queues, and Ghuri does not ship a scheduler or a queue worker. The
-handlers are plain methods on the app, though, so anything that can run code on a schedule can
-call them. A script that a system crontab (or a Kubernetes `CronJob`) runs:
+Node has no Cron Triggers or Queues. `@ghuri/core/node` fires Cron Triggers in-process with the
+same syntax as Cloudflare (UTC; day of week 1-7 with 1 = Sunday):
+
+```ts title="src/server.ts"
+import { serve } from '@ghuri/core/node'
+import app from './index'
+
+serve(app, { scheduler: true })   // every cron registered with onSchedule()
+```
+
+Run the scheduler in exactly one process, or a trigger fires once per process. `startScheduler(app)`
+starts it without a server, and `npx ghuri db_worker --beat` from `@ghuri/tasks` runs it next to
+the task worker. For queued work on Node, use the `database()` backend of
+[`@ghuri/tasks`](/docs/topics/tasks/).
+
+The handlers are plain methods on the app, so a system crontab (or a Kubernetes `CronJob`) can
+call them instead:
 
 ```ts title="scripts/cron.ts"
 import { createExecutionContext } from '@ghuri/core/node'
