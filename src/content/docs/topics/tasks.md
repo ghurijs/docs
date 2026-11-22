@@ -211,6 +211,12 @@ Crons use Cloudflare's syntax and run in UTC. **Day of week is 1-7 with 1 = Sund
   `npx ghuri db_worker --beat`. It fires every cron registered with `onSchedule()`, so your own
   handlers run too.
 
+## Agents
+
+With `@ghuri/agents`, `agent.enqueue()` becomes the `agents.run` task (3 attempts) when
+`@ghuri/tasks` is installed, and returns its `taskResult`. See
+[Background runs](/docs/topics/agents/#background-runs).
+
 ## Signals and admin
 
 `taskEnqueued`, `taskStarted` and `taskFinished` are sent with the backend class as sender and
