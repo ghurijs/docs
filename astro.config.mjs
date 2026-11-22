@@ -180,6 +180,8 @@ export default defineConfig({
             { slug: 'topics/multi-tenancy' },
             { slug: 'topics/signals' },
             { slug: 'topics/tasks' },
+            { slug: 'topics/vectors' },
+            { slug: 'topics/billing' },
             { slug: 'topics/background-tasks' },
             { slug: 'topics/management-commands' },
             { slug: 'topics/testing' },

@@ -253,6 +253,7 @@ AGENTS: {
 | `TRACE_RUNS` | `boolean \| { messages?: boolean }` | `false` | Save a `Run` row per agent run (model, usage, tool calls, outcome, duration); `{ messages: true }` also stores prompts and answers. See [Run traces](/docs/topics/agents/#run-traces). |
 | `STRICT_TOOL_INPUT` | `boolean` | `false` | Check tool arguments against their schemas before tools run, for agents that don't set `strictToolInput`. See [Shaping tools](/docs/topics/agents/#shaping-tools-for-smaller-models). |
 | `CONVERSATION_MODEL` | `string` | `'agents.Conversation'` | The conversation model (swappable, like `AUTH_USER_MODEL`), e.g. a tenant-scoped one. Set it before the first `migrate`. See [Your own conversation model](/docs/topics/agents/#your-own-conversation-model). |
+| `USAGE_LIMITS` | `{ user?, tenant?, anon? }` (each `{ day?, month? }` or a function of the subject) or one function | none (off) | Token budgets per UTC day / month, checked before every agent run and counted after it (table `agents_usage`); over the limit, runs are refused (`429` with `Retry-After` over HTTP). See [Usage limits](/docs/topics/agents/#usage-limits). |
 
 See [AI agents and MCP](/docs/topics/agents/).
 
