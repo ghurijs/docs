@@ -21,6 +21,11 @@ This page builds on [Cron triggers and queues](/docs/topics/background-tasks/), 
 
 ## Install
 
+Projects created with `npm create ghuri` have it already: `TasksConfig` in `INSTALLED_APPS`, a
+`TASKS` setting (Cloudflare Queues when the `TASKS_QUEUE` binding exists, otherwise the database), a
+`<project>-tasks` queue in `wrangler.jsonc`, an `npm run worker` script, and a `tasks.ts` in every app made by
+`ghuri startapp`. In an older project:
+
 ```sh
 npm install @ghuri/tasks@next
 ```
