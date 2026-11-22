@@ -84,6 +84,7 @@ For Workers AI, add the binding to `wrangler.jsonc`:
 | `TRACE_RUNS` | `false` | Save one `Run` row per agent run (see [Run traces](#run-traces)). `{ messages: true }` also stores prompts and answers |
 | `STRICT_TOOL_INPUT` | `false` | Check tool arguments before tools run, for agents that don't set `strictToolInput` (see [Shaping tools](#shaping-tools-for-smaller-models)) |
 | `CONVERSATION_MODEL` | `'agents.Conversation'` | The conversation model, `'app_label.ModelName'` (see [Your own conversation model](#your-own-conversation-model)) |
+| `USAGE_LIMITS` | none (off) | Token budgets per UTC day / month: `{ user, tenant, anon }`, each `{ day?, month? }` or a function of the subject, or one function for every scope (see [Usage limits](#usage-limits)) |
 
 Without `PROVIDERS` keys, `anthropic:` and `openai:` models fall back to the `ANTHROPIC_API_KEY`
 and `OPENAI_API_KEY` environment variables. Add other providers with
@@ -454,6 +455,78 @@ context (`{ tenant }`), the error message and the duration. `TRACE_RUNS: { messa
 run's messages, which contain prompts and answers: decide how long to keep them. A trace that can't be
 saved (for example before `ghuri migrate`) logs one warning and never fails the run.
 
+## Usage limits
+
+Model calls cost money per token. `AGENTS.USAGE_LIMITS` gives each user, tenant and anonymous client a token
+budget per UTC day and month, so one heavy user can't run up the bill for everyone. A run of a subject that has
+used its budget is refused **before it starts**: no model call, no conversation, no trace.
+
+```ts
+// settings.ts
+AGENTS: {
+  USAGE_LIMITS: {
+    user: { day: 200_000, month: 2_000_000 },     // input + output tokens
+    anon: { day: 20_000 },                        // per client address
+    tenant: async (subject) => {                  // a function: plans, exemptions
+      const plan = await Plan.objects.get({ tenant: subject.key })
+      return plan.unlimited ? null : { month: plan.agentTokens }
+    },
+  },
+}
+```
+
+Run `ghuri migrate` after setting it: usage is counted in `agents.Usage` (table `agents_usage`, migration
+`agents.0003_usage`), one row per subject and window, incremented by the database after every run.
+
+**Subjects.** A run counts against the user (`user`, keyed by pk) or, for anonymous users, the client
+(`anon`, keyed by the address [throttles](/docs/topics/rest/throttling/) use; `'*'` for runs without a request,
+such as queued ones), plus the tenant (`tenant`) when one is active: agents read it from the context
+`@ghuri/tenants` carries, so queued runs count against the tenant that enqueued them. Only the scopes you name are
+counted; a function for the whole setting, `USAGE_LIMITS: (subject) => …`, covers every scope. The function
+receives `{ scope, key, user }` and returns `{ day?, month? }`, or `null` for no limit (the subject is still
+counted). It runs before every run, so keep it cheap or cache it.
+
+**What counts.** The run's total tokens (`usage.totalTokens`, else input + output), all steps included. Cached input
+reads are part of the input and also kept apart. Failed runs report no usage and count nothing.
+
+**Where it is checked.**
+
+| A run started by | Over the limit |
+|---|---|
+| `POST …/chat` (JSON or server-sent events) | `429` with `Retry-After` (seconds until the window resets), `{ detail: 'Token usage limit reached for this day. Expected available in 7200 seconds.' }`, code `usage_limit_exceeded` |
+| MCP `ask_<agent>` | a tool result with `isError: true`, the reason and `retryAfter` |
+| `agent.run()`, `agent.stream()` | `UsageLimitExceeded` (`subject`, `period`, `limit`, `used`, `resetsAt`, `wait`) |
+| `agent.enqueue()` | `UsageLimitExceeded`; nothing is enqueued |
+| the queued run, when it runs | with `@ghuri/tasks`, the attempt fails (the task ends `FAILED`); with a Cloudflare Queue, the message is acked and logged, not retried |
+
+In your own views, `modelCallError(err)` (or `usageThrottled(err)`) turns `UsageLimitExceeded` into the same
+`Throttled` response.
+
+**Showing usage.** `getUsage({ user })` returns the current day and month of each subject, for a "you have used
+X of Y tokens" UI; every `AgentRouter` also serves it at `GET /agents/usage/` for the requesting user:
+
+```ts
+import { getUsage } from '@ghuri/agents'
+
+const usage = await getUsage({ user: request.user })
+// [{ scope: 'user', key: '42', period: 'day', start: '2026-11-23', resetsAt, used: 1234,
+//    limit: 200000, remaining: 198766, inputTokens, outputTokens, cachedInputTokens, runs }, …]
+```
+
+**Signals.** `usageLimitReached` is sent when a run (or `enqueue()`) is refused, with the error and the subjects:
+send a notification or an upgrade offer. `usageRecorded` is sent after a run was counted, with the tokens; call
+`getUsage()` there to warn at 80 %. Receivers that throw are logged and never fail the run.
+
+**Admin.** `import '@ghuri/agents/admin'` in one of your admin modules registers read-only `Usage` and `Run`
+admins. Deleting a `Usage` row resets that subject's count for the window.
+
+:::caution[Soft limits]
+The counters are read before a run and updated after it. Runs that start at the same time all pass the same
+check, and the run that crosses the limit is finished rather than cut off, so a subject can go over its budget
+by about (concurrent runs) × (tokens of one run). Keep `maxSteps` and `maxOutputTokens` low to bound it, and
+combine limits with [throttling](/docs/topics/rest/throttling/) of the chat endpoint.
+:::
+
 ## Conversation memory
 
 With `AgentsConfig` installed, every run is stored as a `Conversation` (owner, agent name, title,
@@ -642,10 +715,11 @@ expect(result.toolCalls[0].output.count).toBe(2)
 - Treat everything a tool returns as untrusted input to the model. Content written by users (post
   bodies, comments) can contain instructions; gate destructive tools with `onToolCall`, keep
   `maxSteps` low and audit with `afterRun`.
-- Throttle the chat endpoint ([throttling](/docs/topics/rest/throttling/)); model calls cost
-  money.
+- Throttle the chat endpoint ([throttling](/docs/topics/rest/throttling/)) and set token budgets
+  ([usage limits](#usage-limits)); model calls cost money.
 
 :::note
 `Conversation` and `Message` are not registered in the admin automatically. Register them in one
-of your own `admin.ts` modules if you want to review conversations there.
+of your own `admin.ts` modules if you want to review conversations there. `import '@ghuri/agents/admin'`
+registers `Usage` and `Run`.
 :::
