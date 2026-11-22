@@ -179,6 +179,7 @@ export default defineConfig({
             { slug: 'topics/email' },
             { slug: 'topics/multi-tenancy' },
             { slug: 'topics/signals' },
+            { slug: 'topics/tasks' },
             { slug: 'topics/background-tasks' },
             { slug: 'topics/management-commands' },
             { slug: 'topics/testing' },

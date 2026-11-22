@@ -370,11 +370,25 @@ See [Multi-tenancy](/docs/topics/multi-tenancy/).
 | `raise CommandError('...')` | `throw new CommandError('...')` |
 | cron job running a command | `onSchedule('0 3 * * *', fn)` + `triggers.crons` in `wrangler.jsonc` |
 | Celery task consumer | `onQueue('emails', fn)` + a Cloudflare Queues consumer binding |
+| `@task(queue_name='emails')` (Django 6.0 `django.tasks`) | `task(fn, { queueName: 'emails' })` from `@ghuri/tasks` |
+| `my_task.enqueue(post.pk)` / `aenqueue` | `await myTask.enqueue(post.pk)` |
+| `TASKS = {"default": {"BACKEND": "...ImmediateBackend"}}` | `TASKS: { default: immediate() }` (or `cloudflareQueues()`, `database()`, `dummy()`) |
+| django-tasks `db_worker` | `npx ghuri db_worker` |
+| Celery beat | `periodicTask('0 3 * * *', task)` from `@ghuri/tasks` |
 
 ## Differences and limitations
 
 These are the places where Ghuri behaves differently from Django on purpose, or has not caught
 up yet.
+
+:::note[Tasks]
+`@ghuri/tasks` follows Django 6.0's `django.tasks`. Tasks are named `<app label>.<export name>`
+(`modulePath`) because there are no module paths at runtime; arguments are positional only;
+`returnValue` throws `TaskResultNotReady` instead of `ValueError`; `TaskError` has
+`exceptionClassPath` and `traceback`. Ghuri adds retries (`maxAttempts`, `retryDelay`), periodic
+tasks, request context carried to the worker, and `DummyBackend.runPending()`. See
+[Tasks](/docs/topics/tasks/).
+:::
 
 :::caution[D1 transactions do not roll back]
 D1 has no interactive transactions. On D1, `atomic()` runs the callback directly: there is no
