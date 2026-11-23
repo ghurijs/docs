@@ -294,6 +294,26 @@ or a marketing page keep working. Set `TENANTS.REQUIRED: true`, or use
 `new TenantMiddleware({ required: true })`, to answer 404 instead. A view reads the tenant with
 `currentTenant()` or `c.get('tenant')`.
 
+With `REQUIRED`, mark the views that legitimately arrive without a tenant, such as a payment
+provider's webhook or a health check, with `tenantNotRequired(view)`. It works like Django's
+`login_not_required` for `LoginRequiredMiddleware`. A marked view runs with no tenant, so
+tenant-scoped queries in it still fail closed. A tenant the resolvers do find is still activated,
+and an unknown one is still a 404. [`@ghuri/billing`](/docs/topics/billing/)'s webhook view is
+marked already.
+
+```ts
+import { tenantNotRequired } from '@ghuri/tenants'
+
+export default [
+  path('healthz/', tenantNotRequired(healthView)),
+  path('hooks/github/', tenantNotRequired(githubWebhook)),
+]
+```
+
+The marker is `Symbol.for('ghuri.tenantNotRequired')` (`TENANT_NOT_REQUIRED_MARKER`), so a package
+can mark its own views without depending on `@ghuri/tenants`. `isTenantNotRequired(c)` checks the
+current request. *New after 0.1.0-alpha.3.*
+
 :::caution[Resolving is not authorizing]
 A resolver only says which tenant a request is **for**. Whether the signed-in user may act for
 that tenant is a permission check: compare `request.user` with your own membership model in a

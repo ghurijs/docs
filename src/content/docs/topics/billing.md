@@ -67,8 +67,8 @@ committed. Use test keys (`sk_test_…`) until you go live: `ghuri check --deplo
 runs with `DEBUG = false`.
 
 In the Stripe dashboard, add a webhook endpoint at `https://<your app>/billing/webhook/` that sends
-`checkout.session.completed`, `customer.*`, `customer.subscription.*`, `product.*`, `price.*` and
-`invoice.*`. For local development, the Stripe CLI forwards events and prints the signing secret:
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.*`,
+`customer.subscription.*`, `product.*`, `price.*` and `invoice.*`. For local development, the Stripe CLI forwards events and prints the signing secret:
 
 ```sh
 stripe listen --forward-to localhost:8787/billing/webhook/
@@ -80,14 +80,18 @@ A plan is a key in `BILLING.PLANS`. Its `prices` are the price ids, lookup keys 
 put a subscriber on it. Its `features` and `limits` are your own vocabulary. A subscriber without an
 active subscription is on `DEFAULT_PLAN`.
 
+In a plain view, the user is `getUser(c)` (in an `APIView`, `this.request.user`):
+
 ```ts
+import { getUser, redirect } from '@ghuri/core'
 import { getEntitlements, getSubscription, hasActiveSubscription, hasFeature } from '@ghuri/billing'
 
-const sub = await getSubscription(request.user)          // Subscription | null
-if (!(await hasActiveSubscription(request.user))) return redirect(c, '/pricing/')
-if (await hasFeature(request.user, 'export')) { … }
-const { plan, limits } = await getEntitlements(request.user)
-if ((await Project.objects.filter({ owner: request.user }).count()) >= (limits.projects as number)) { … }
+const user = getUser(c)
+const sub = await getSubscription(user)                  // Subscription | null
+if (!(await hasActiveSubscription(user))) return redirect(c, '/pricing/')
+if (await hasFeature(user, 'export')) { … }
+const { plan, limits } = await getEntitlements(user)
+if ((await Project.objects.filter({ owner: user }).count()) >= (limits.projects as number)) { … }
 ```
 
 | Function | Returns |
@@ -102,6 +106,9 @@ if ((await Project.objects.filter({ owner: request.user }).count()) >= (limits.p
 A `subject` is a user or tenant instance, a `Customer`, a reference `{ type?, id }`, or a Hono
 context (resolved with `BILLING.SUBSCRIBER`). To keep access while a payment is retried, add
 `'past_due'` to `ACTIVE_STATUSES`.
+
+`requireSubscriber(c)` returns the request's subscriber, or throws `NoSubscriber`: an HTTP error that
+answers 401 in plain views and API views alike.
 
 ### Protecting views
 
@@ -154,6 +161,38 @@ A JSON request gets `{ id, url }`; a form post is redirected (`303`) to Stripe.
 switch plans, update cards, download invoices and cancel. It returns to `RETURN_URL`, or to the
 `returnUrl` sent with the request.
 
+### Authentication and single-page apps
+
+Both views authenticate the way [REST API views](/docs/topics/rest/) do, so a single-page app calls
+them with the same token or JWT it sends to the rest of its API:
+
+- They run `BILLING.AUTHENTICATION_CLASSES`, which defaults to
+  `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES`. The first class that returns a user wins, and
+  `getUser(c)` is that user, including in `BILLING.SUBSCRIBER`.
+- Like `APIView`, the views are CSRF-exempt. Session authentication still enforces CSRF, as DRF's
+  `SessionAuthentication` does, while token and JWT requests need no CSRF token. When classes are set
+  and none matches, the request is anonymous: a session cookie the classes do not accept is ignored.
+- Without either setting, the session user of `AuthenticationMiddleware` is used, and CSRF is checked.
+- A request with no subscriber gets `401 {"detail": "Authentication credentials were not provided."}`,
+  with `WWW-Authenticate` when the first class has a scheme (`Bearer realm="api"`).
+
+```ts
+import { JWTAuthentication, SessionAuthentication } from '@ghuri/auth/rest'
+
+REST_FRAMEWORK: { DEFAULT_AUTHENTICATION_CLASSES: [SessionAuthentication, JWTAuthentication] },
+// or for billing only: BILLING: { AUTHENTICATION_CLASSES: [JWTAuthentication], … }
+```
+
+```ts
+// in the SPA
+const { url } = await fetch('/billing/checkout/', {
+  method: 'POST',
+  headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ plan: 'pro' }),
+}).then((r) => r.json())
+location.href = url
+```
+
 ## Webhooks
 
 The webhook view is the only way subscriptions change locally, so every change made at Stripe (in
@@ -166,7 +205,9 @@ Checkout, the portal or the dashboard) comes back through it.
   repeated delivery of a processed event answers 200 without running again. Two deliveries arriving
   at once are processed only once.
 - **Sync.** Customers, products, prices, subscriptions (with their items) and invoices are upserted.
-  A completed checkout links the customer to the subscriber and fetches the new subscription.
+  A completed checkout (`checkout.session.completed`, or `checkout.session.async_payment_succeeded`
+  when a delayed payment method such as a bank debit succeeds) links the customer to the subscriber
+  and fetches the new subscription.
 - **Ordering.** Stripe does not promise order. A subscription event older than the newest one
   already applied is skipped.
 - **Failures.** If processing fails, the view answers 500 so that Stripe retries, and the event keeps
@@ -195,6 +236,23 @@ BILLING: {
 A customer refers to its subscriber by model label and primary key (`subscriberType`,
 `subscriberId`) rather than by a foreign key. Billing therefore never imports `@ghuri/tenants`, and
 moving from per-user to per-tenant billing does not change the schema.
+
+Stripe's webhook requests carry no tenant. With `TENANTS.REQUIRED: true` every other request
+without a tenant answers 404, but the webhook view carries the
+[`tenantNotRequired()`](/docs/topics/multi-tenancy/) marker, so it is still processed (this needs a
+`@ghuri/tenants` newer than 0.1.0-alpha.3). It runs with no tenant, which billing's own tables do
+not need. A signal receiver that touches tenant-scoped models activates the subscriber's tenant
+itself:
+
+```ts
+import { runAsTenant } from '@ghuri/tenants'
+
+subscriptionCreated.connect(async ({ subscription }) => {
+  const customer = await subscription.customer
+  const tenant = await Tenant.objects.get({ pk: customer.subscriberId })
+  await runAsTenant(tenant, () => Project.objects.filter({ archived: true }).update({ archived: false }))
+})
+```
 
 ## Token budgets for agents
 
@@ -235,10 +293,12 @@ other Workers isolates pick it up within the TTL.
 
 ```ts
 import { invoicePaymentFailed } from '@ghuri/billing'
+import { sendMail } from '@ghuri/mail'
 
 invoicePaymentFailed.connect(async ({ invoice }) => {
   const customer = await invoice.customer
-  await sendMail({ subject: 'Your payment failed', message: invoice.hostedInvoiceUrl, recipientList: [customer.email] })
+  // sendMail(subject, message, fromEmail, recipientList, opts?); null uses DEFAULT_FROM_EMAIL
+  await sendMail('Your payment failed', invoice.hostedInvoiceUrl, null, [customer.email])
 })
 ```
 
