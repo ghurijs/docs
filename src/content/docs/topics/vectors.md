@@ -64,7 +64,9 @@ keeps its own vectors. Use the same model on both when you move vectors between 
 
 Options every store takes:
 
-- `embedding` (required): a model id, an AI SDK model or an `Embedder` (see below).
+- `embedding`: a model id, an AI SDK model or an `Embedder` (see below). The type makes it optional, but a
+  store without one raises `InvalidVectorStore` the first time it needs to embed, and `ghuri check`
+  reports `vectors.E004`. Set it on every store.
 - `dimensions`: the vector length. Known for the built-in model ids; otherwise taken from the first
   embedding. `pgvector()` needs it to create its table.
 - `metric`: `'cosine'` (default), `'euclidean'` or `'dot-product'`.
@@ -112,14 +114,17 @@ no extra package:
 | Provider | Example | Credentials |
 |---|---|---|
 | `workers-ai:` | `workers-ai:@cf/baai/bge-base-en-v1.5` (768), `bge-small-en-v1.5` (384), `bge-m3` (1024) | the AI binding (`AGENTS.AI_BINDING`, default `AI`) |
-| `openai:` | `openai:text-embedding-3-small` (1536) | `OPENAI_API_KEY`; `baseURL` for compatible APIs |
+| `openai:` | `openai:text-embedding-3-small` (1536) | `OPENAI_API_KEY`; `OPENAI_BASE_URL` or `baseURL` for compatible APIs |
 | `ghuri-ai:` | `ghuri-ai:openai/text-embedding-3-small` | `GHURI_AI_URL`, `GHURI_AI_API_KEY`; sends `x-ghuri-tenant` |
 
-Keys and URLs are looked up in this order:
+Provider options (`apiKey`, `baseURL`, `headers`) form one object:
 
-1. the store's `providerOptions`;
-2. `AGENTS.PROVIDERS[provider]`, so one key serves agents and vectors;
-3. environment variables.
+- A store's `providerOptions` **replace** `AGENTS.PROVIDERS[provider]` entirely. They are not merged,
+  so a store that sets only `baseURL` does not inherit the `apiKey` from `AGENTS`.
+- Without `providerOptions`, the object is `AGENTS.PROVIDERS[provider]`, so one key serves agents and
+  vectors.
+- Then each key the object lacks is read from the environment: `OPENAI_API_KEY` and `OPENAI_BASE_URL`
+  for `openai:`, `GHURI_AI_API_KEY` and `GHURI_AI_URL` for `ghuri-ai:`.
 
 You can also pass any AI SDK embedding model, such as `google.textEmbeddingModel('text-embedding-004')`.
 To add a provider, call `registerEmbeddingProvider(name, factory)`.
@@ -232,7 +237,8 @@ With `@ghuri/tenants` installed, indexes are scoped to the current tenant. The d
 - The tenant goes into the store namespace (`support.handbook|t=42`). On Vectorize, that is native
   namespace isolation. On the other stores, it is a `namespace = …` condition that every query
   carries.
-- Without a current tenant, `index()`, `search()`, `delete()` and `clear()` raise `TenantRequired`.
+- Without a current tenant, `index()`, `search()`, `delete()`, `clear()` and `keys()` raise `TenantRequired`,
+  and so does `ModelIndex.update()`.
   This includes code inside `withoutTenant()`. There is no search across tenants.
 - Background indexing and `update_index --tenant <pk>` run as the right tenant.
 - `ModelIndex` loads hits through the model's manager, so tenant managers apply too.
@@ -285,9 +291,9 @@ export class SupportAgent extends Agent {
 
 | Command | Does |
 |---|---|
-| `ghuri update_index [index…] [--tenant pk] [--batch-size 100] [--force]` | index every row of model indexes; unchanged rows are skipped, deleted rows removed |
-| `ghuri clear_index [index…] [--tenant pk]` | delete every vector of the indexes |
-| `ghuri rebuild_index [index…] [--tenant pk]` | clear, then update |
+| `ghuri update_index [index…] [--tenant pk] [--namespace name] [--batch-size 100] [--force]` | index every row of model indexes; unchanged rows are skipped, deleted rows removed. Plain `VectorIndex`es are skipped, because there are no rows to read |
+| `ghuri clear_index [index…] [--tenant pk] [--namespace name]` | delete every vector of the indexes, plain ones too |
+| `ghuri rebuild_index [index…] [--tenant pk] [--namespace name] [--batch-size 100]` | clear, then update every row again. Plain `VectorIndex`es are cleared but not refilled |
 | `ghuri createvectortable [--store alias]` | create pgvector tables |
 
 `ghuri check` reports:
